@@ -1,0 +1,156 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-pool-controller
+  namespace: sandbox-system
+  labels:
+    app: sandbox-pool-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sandbox-pool-controller
+rules:
+  - apiGroups: ["agents.kruise.io"]
+    resources: ["sandboxsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["agents.kruise.io"]
+    resources: ["sandboxclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["agents.kruise.io"]
+    resources: ["sandboxes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sandbox-pool-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sandbox-pool-controller
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-pool-controller
+    namespace: sandbox-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-pool-controller
+  namespace: sandbox-system
+  labels:
+    app: sandbox-pool-controller
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: sandbox-pool-controller
+  template:
+    metadata:
+      labels:
+        app: sandbox-pool-controller
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: sandbox-pool-controller
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: sandbox-pool-controller
+      containers:
+        - name: controller
+          image: sandbox-pool-controller:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RECONCILE_INTERVAL
+              value: 2s
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HTTP_ADDRESS
+              value: ":8080"
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 1
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sandbox-pool-controller
+  namespace: sandbox-system
+  labels:
+    app: sandbox-pool-controller
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: sandbox-pool-controller
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-pool-controller
+  namespace: sandbox-system
+  labels:
+    app: sandbox-pool-controller
+spec:
+  selector:
+    app: sandbox-pool-controller
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
