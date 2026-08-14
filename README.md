@@ -75,6 +75,13 @@ metadata:
     max-scale: "10"
 ```
 
+也可以使用正式开关注解 `pool-autoscaling.bohr.io/enabled: "true"`。开启动态池后，
+需要部署支持动态池需求信号的 `sandbox-agent`：每次 claim 会递增 SandboxSet 上的
+`pool-autoscaling.bohr.io/demand-total` 并更新 `last-demand-time`。该路径强制
+`CreateOnNoStock=false`；没有 Ready 库存时当前请求立即返回 HTTP 503
+`sandbox set ... is not ready`，Controller 消费需求计数并把 0 库存至少扩到 1，
+客户端应在库存 Ready 后重试。
+
 还可以配置：
 
 ```yaml
@@ -91,7 +98,8 @@ pool-autoscaling.bohr.io/capacity-utilization: "0.8"
 pool-autoscaling.bohr.io/supply-timeout-multiplier: "3"
 ```
 
-控制器统计每个模板近期 `SandboxClaim` 数量，使用
+控制器合并统计每个模板近期 `SandboxClaim` 数量和 sandbox-manager 写入的单调需求
+计数，使用
 `rate × max(refill-SLA, 0) + z × sqrt(rate × refill) + guard`
 计算库存；需求上升时扩容，无请求超过 idle 时间后回落到 `min-scale`。
 
@@ -99,7 +107,7 @@ pool-autoscaling.bohr.io/supply-timeout-multiplier: "3"
 
 - 从 Sandbox `Ready.lastTransitionTime - creationTimestamp` 自动学习补货时间分位数；
 - 样本和去重检查点写入 `sandbox-system/sandbox-pool-controller-state` ConfigMap，
-  Controller 重启或 leader 切换后不会重新学习；
+  Controller 重启或 leader 切换后不会重新学习，也不会重复消费需求计数；
 - 根据 `maxUnavailable × capacity-utilization / refill-P95` 计算供给吞吐上限，
   区分算法期望库存 `target-intent` 与实际放行库存 `target-applied`；
 - 在途 Sandbox 超过 `refill-P95 × supply-timeout-multiplier` 时进入 `DEGRADED`

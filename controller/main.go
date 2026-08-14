@@ -56,6 +56,8 @@ const (
 	refillSourceKey        = "pool-autoscaling.bohr.io/refill-source"
 	refillSamplesKey       = "pool-autoscaling.bohr.io/refill-samples"
 	demandRateKey          = "pool-autoscaling.bohr.io/demand-rate"
+	demandTotalKey         = "pool-autoscaling.bohr.io/demand-total"
+	lastDemandTimeKey      = "pool-autoscaling.bohr.io/last-demand-time"
 	supplyCapacityKey      = "pool-autoscaling.bohr.io/supply-capacity-rate"
 	intentKey              = "pool-autoscaling.bohr.io/target-intent"
 	appliedKey             = "pool-autoscaling.bohr.io/target-applied"
@@ -303,8 +305,17 @@ func (c *controller) reconcilePool(
 	}
 
 	latestDemand := set.GetCreationTimestamp().Time
-	recentReplicas := 0
 	windowStart := now.Add(-time.Duration(config.rateWindowSeconds * float64(time.Second)))
+	demandTotal, directDemandAt, err := directDemandFromAnnotations(annotations)
+	if err != nil {
+		return err
+	}
+	recentReplicas, persistedDemandAt := c.state.observeDemand(
+		poolID, demandTotal, directDemandAt, windowStart,
+	)
+	if persistedDemandAt.After(latestDemand) {
+		latestDemand = persistedDemandAt
+	}
 	for _, event := range events {
 		if event.at.After(latestDemand) {
 			latestDemand = event.at
@@ -323,6 +334,9 @@ func (c *controller) reconcilePool(
 		config.safetyGuard,
 	)
 	intent := clamp(rawTarget, config.minReplicas, config.maxReplicas)
+	if recentReplicas > 0 && current == 0 && config.maxReplicas > 0 {
+		intent = max(intent, 1)
+	}
 	state := "NORMAL"
 
 	idleFor := now.Sub(latestDemand).Seconds()
@@ -418,6 +432,26 @@ func (c *controller) reconcilePool(
 
 func dynamicPoolEnabled(annotations map[string]string) bool {
 	return parseBool(firstNonEmpty(annotations[enabledKey], annotations[legacyEnabledKey]), false)
+}
+
+func directDemandFromAnnotations(annotations map[string]string) (uint64, time.Time, error) {
+	rawTotal := strings.TrimSpace(annotations[demandTotalKey])
+	if rawTotal == "" {
+		return 0, time.Time{}, nil
+	}
+	total, err := strconv.ParseUint(rawTotal, 10, 64)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("parse %s: %w", demandTotalKey, err)
+	}
+	if total == 0 {
+		return 0, time.Time{}, nil
+	}
+	rawTime := strings.TrimSpace(annotations[lastDemandTimeKey])
+	at, err := time.Parse(time.RFC3339Nano, rawTime)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("parse %s: %w", lastDemandTimeKey, err)
+	}
+	return total, at, nil
 }
 
 func configFromAnnotations(annotations map[string]string) poolConfig {

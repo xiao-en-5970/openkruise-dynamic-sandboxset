@@ -99,7 +99,7 @@ func (m *metricsRegistry) ServeHTTP(writer http.ResponseWriter, _ *http.Request)
 		name        string
 		description string
 	}{
-		{"sandbox_pool_demand_rate", "Observed SandboxClaim demand per second."},
+		{"sandbox_pool_demand_rate", "Observed SandboxClaim and direct claim demand per second."},
 		{"sandbox_pool_refill_p95_seconds", "Effective creation-to-Ready quantile or configured fallback in seconds."},
 		{"sandbox_pool_refill_learned", "Whether the effective refill lead time comes from learned samples."},
 		{"sandbox_pool_refill_samples", "Number of persisted refill lead-time samples."},

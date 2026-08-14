@@ -27,10 +27,18 @@ type supplyObservation struct {
 	ready     bool
 }
 
+type persistedDemandSample struct {
+	At       time.Time `json:"at"`
+	Replicas int       `json:"replicas"`
+}
+
 type persistedPoolState struct {
-	LeadSamplesSeconds []float64 `json:"leadSamplesSeconds,omitempty"`
-	ReadyCheckpoint    time.Time `json:"readyCheckpoint,omitempty"`
-	ReadyUIDs          []string  `json:"readyUIDs,omitempty"`
+	LeadSamplesSeconds  []float64               `json:"leadSamplesSeconds,omitempty"`
+	ReadyCheckpoint     time.Time               `json:"readyCheckpoint,omitempty"`
+	ReadyUIDs           []string                `json:"readyUIDs,omitempty"`
+	ObservedDemandTotal uint64                  `json:"observedDemandTotal,omitempty"`
+	DemandSamples       []persistedDemandSample `json:"demandSamples,omitempty"`
+	LastDemandTime      time.Time               `json:"lastDemandTime,omitempty"`
 }
 
 type persistedControllerState struct {
@@ -209,6 +217,59 @@ func (s *stateStore) leadTime(
 		return fallback, sampleCount, false
 	}
 	return sampleQuantile(pool.LeadSamplesSeconds, quantile), sampleCount, true
+}
+
+// observeDemand converts the monotonic request counter written by
+// sandbox-manager into windowed demand samples. Persisting the last observed
+// counter prevents controller restarts or leader changes from replaying old
+// requests as new demand.
+func (s *stateStore) observeDemand(
+	poolID string,
+	total uint64,
+	at time.Time,
+	windowStart time.Time,
+) (recentReplicas int, latestDemand time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pool := s.state.Pools[poolID]
+	if pool == nil {
+		pool = &persistedPoolState{}
+		s.state.Pools[poolID] = pool
+	}
+
+	if total != pool.ObservedDemandTotal {
+		delta := total
+		if total > pool.ObservedDemandTotal {
+			delta = total - pool.ObservedDemandTotal
+		}
+		pool.ObservedDemandTotal = total
+		if delta > 0 && !at.IsZero() {
+			maxInt := uint64(^uint(0) >> 1)
+			if delta > maxInt {
+				delta = maxInt
+			}
+			pool.DemandSamples = append(pool.DemandSamples, persistedDemandSample{
+				At:       at,
+				Replicas: int(delta),
+			})
+			if at.After(pool.LastDemandTime) {
+				pool.LastDemandTime = at
+			}
+		}
+		s.dirty = true
+	}
+
+	retained := pool.DemandSamples[:0]
+	for _, sample := range pool.DemandSamples {
+		if sample.At.Before(windowStart) {
+			s.dirty = true
+			continue
+		}
+		retained = append(retained, sample)
+		recentReplicas += sample.Replicas
+	}
+	pool.DemandSamples = retained
+	return recentReplicas, pool.LastDemandTime
 }
 
 func (s *stateStore) prune(activePools map[string]struct{}) {

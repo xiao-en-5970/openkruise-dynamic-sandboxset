@@ -5,7 +5,11 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -107,5 +111,98 @@ func TestLeadTimeStateSurvivesControllerRestart(t *testing.T) {
 	lead, count, learned := restarted.leadTime("default/pool@uid", 0.95, 1, 40)
 	if !learned || count != 1 || lead != 7 {
 		t.Fatalf("state did not survive restart: learned=%t count=%d lead=%f", learned, count, lead)
+	}
+}
+
+func TestDirectDemandCounterIsConsumedOnceAndSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	kube := fake.NewSimpleClientset()
+	poolID := "default/pool@uid"
+	now := time.Date(2026, 8, 6, 9, 0, 0, 0, time.UTC)
+	windowStart := now.Add(-time.Minute)
+
+	first := newStateStore(kube, "sandbox-system")
+	recent, latest := first.observeDemand(poolID, 5, now, windowStart)
+	if recent != 5 || !latest.Equal(now) {
+		t.Fatalf("unexpected first demand observation: recent=%d latest=%s", recent, latest)
+	}
+	recent, _ = first.observeDemand(poolID, 5, now, windowStart)
+	if recent != 5 {
+		t.Fatalf("unchanged counter must not be consumed twice, got %d", recent)
+	}
+	if err := first.save(ctx); err != nil {
+		t.Fatalf("save demand state: %v", err)
+	}
+
+	restarted := newStateStore(kube, "sandbox-system")
+	if err := restarted.load(ctx); err != nil {
+		t.Fatalf("load demand state: %v", err)
+	}
+	recent, _ = restarted.observeDemand(poolID, 5, now, windowStart)
+	if recent != 5 {
+		t.Fatalf("restart must not replay the persisted counter, got %d", recent)
+	}
+	recent, _ = restarted.observeDemand(poolID, 7, now.Add(time.Second), windowStart)
+	if recent != 7 {
+		t.Fatalf("expected only the counter delta to be appended, got %d", recent)
+	}
+	recent, latest = restarted.observeDemand(poolID, 7, now.Add(time.Second), now.Add(2*time.Second))
+	if recent != 0 || !latest.Equal(now.Add(time.Second)) {
+		t.Fatalf("expired samples should leave only idle timestamp: recent=%d latest=%s", recent, latest)
+	}
+}
+
+func TestReconcilePoolActivatesFromDirectDemandWithoutSandboxClaim(t *testing.T) {
+	now := time.Date(2026, 8, 6, 9, 0, 0, 0, time.UTC)
+	set := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "agents.kruise.io/v1alpha1",
+		"kind":       "SandboxSet",
+		"metadata": map[string]any{
+			"name":              "dynamic-pool",
+			"namespace":         "default",
+			"uid":               "pool-uid",
+			"creationTimestamp": now.Add(-time.Hour).Format(time.RFC3339),
+			"annotations": map[string]any{
+				enabledKey:        "true",
+				maxReplicasKey:    "1",
+				safetyGuardKey:    "0",
+				demandTotalKey:    "1",
+				lastDemandTimeKey: now.Format(time.RFC3339Nano),
+			},
+		},
+		"spec": map[string]any{"replicas": int64(0)},
+		"status": map[string]any{
+			"replicas":          int64(0),
+			"availableReplicas": int64(0),
+		},
+	}}
+	set.SetUID(types.UID("pool-uid"))
+	set.SetCreationTimestamp(metav1.NewTime(now.Add(-time.Hour)))
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), set)
+	ctrl := &controller{
+		client:  dynamicClient,
+		state:   newStateStore(fake.NewSimpleClientset(), "sandbox-system"),
+		metrics: newMetricsRegistry(),
+	}
+
+	if err := ctrl.reconcilePool(context.Background(), set, nil, nil, now); err != nil {
+		t.Fatalf("reconcile direct demand: %v", err)
+	}
+	updated, err := dynamicClient.Resource(sandboxSetGVR).Namespace("default").Get(
+		context.Background(), "dynamic-pool", metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("get updated SandboxSet: %v", err)
+	}
+	replicas, found, err := unstructured.NestedInt64(updated.Object, "spec", "replicas")
+	if err != nil || !found || replicas != 1 {
+		t.Fatalf("direct demand must activate pool 0 -> 1, replicas=%d found=%t err=%v", replicas, found, err)
+	}
+}
+
+func TestDirectDemandAnnotationsRequireTimestamp(t *testing.T) {
+	_, _, err := directDemandFromAnnotations(map[string]string{demandTotalKey: "1"})
+	if err == nil {
+		t.Fatal("positive direct demand without timestamp must be rejected")
 	}
 }
