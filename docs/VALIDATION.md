@@ -1,5 +1,11 @@
 # 固定随机种子验证结论
 
+> 当前支持边界（2026-08-17）：Controller 作为 OpenKruise Agents 的外置组件，
+> 读写官方 SandboxSet、SandboxClaim 和 Sandbox 对象，不修改 sandbox-agent。
+> SandboxClaim 的未领取副本可直接形成排队信号；直接 E2B 请求入口可以选择写入带
+> 时间戳的 `pending-demand` 注解。默认 `min-scale=1`，显式配置 0 且具备上述需求
+> 信号时支持空闲归零和重新唤醒。
+
 运行方式：
 
 ```bash
@@ -7,7 +13,7 @@
 .venv/bin/python simulation/scenario_matrix.py
 ```
 
-单元测试结果：`11 passed`。
+Python 单元测试结果：`14 passed`；Go Controller 测试全部通过。
 
 ## 关键场景结果
 
@@ -40,7 +46,7 @@
 这些结果只验证策略与 OpenKruise 库存语义，不代表真实集群控制器、调度器或镜像
 拉取性能；上线前仍需用生产指标回放校准补货时延分布和流量过程。
 
-## 本地 kind 实集群闭环验证
+## kind 实集群算法验证
 
 2026-08-02 在单节点 kind 集群和 OpenKruise Agents 上部署了
 `controller/` 中的原生 Controller，验证结果如下：
@@ -72,6 +78,9 @@
   `DEGRADED`；算法保留 `intent=5`，第一步只放行 `applied=1`；
 - 故障镜像场景中，在途 Sandbox 超过 2 秒阈值后进入 `DEGRADED`，
   `intent=2`、`applied=1`，证明超时熔断阻止了继续堆积。
+- 突发需求单元测试验证 5/15/60 秒窗口取最大值，慢窗口不会稀释快速窗口；
+- 排队需求单元测试验证未领取 SandboxClaim 和新鲜 `pending-demand` 会直接增加
+  `target-intent`，并可将显式 `min-scale=0` 的池从 0 唤醒；过期时间戳会被忽略。
 
 这些结果验证控制回路和故障保护机制，不代表生产镜像、GPU 调度器或节点扩容性能。
 当前仍使用定时调谐而非事件 informer，流量预测也只基于近期 Claim 窗口；生产上线

@@ -1,10 +1,10 @@
-# OpenKruise SandboxSet 动态预热池
+# OpenKruise SandboxSet 外置动态预热池
 
 项目包含两个相互独立、使用同一算法模型的部分：
 
 - `simulation/`：Python 离散事件仿真器和中文 Gradio 控制台；
-- `controller/`：可部署到 Kubernetes 的注解驱动动态预热池 Controller，直接调节
-  `SandboxSet.spec.replicas`。
+- `controller/`：基于 OpenKruise Agents 官方 CRD 的注解驱动 Controller，直接调节
+  `SandboxSet.spec.replicas`，不修改 sandbox-manager 或 OpenKruise Agents 源码。
 - `deploy/`：RBAC、双副本 Deployment、Service 和 PodDisruptionBudget；
 - `docs/`：算法验证结论和设计记录。
 
@@ -13,7 +13,7 @@
 - `SandboxSet.spec.replicas` 是未分配库存，即 `available + creating`。
 - Sandbox 被 claim 后立即离开池，控制器立刻补齐缺口。
 - `scaleStrategy.maxUnavailable` 限制同时处于 `creating` 的数量；`0` 表示不限。
-- 仿真器默认让缺货请求等待补货；实集群可通过 `createOnNoStock` 选择冷创建。
+- 是否允许缺货冷创建由官方 `createOnNoStock` 字段决定；本组件不拦截或改写请求。
 
 ## 运行控制台
 
@@ -35,13 +35,14 @@ python3 -m venv .venv
 ## 策略
 
 1. **固定池**：`target` 始终等于初始池大小。
-2. **原始中位数快扩慢缩**：复现 `docs/我的思路.md` 的公式
+2. **原始中位数快扩慢缩**：复现早期 `t / r × v` 思路中的公式
    `ceil(rate × median_refill / SLA)`，目标不足时按倍数快扩，过量时按间隔减 1；
    最近 3 个补货中有 2 个超过历史中位数指定倍数时暂停扩容。
 3. **提前期需求分位数**：使用
    `rate × max(lead-SLA, 0) + z × sqrt(rate × lead)`，把允许等待和
    Poisson 安全库存分开表达。
-4. **生产级安全库存**：加入短期速率、提前预测、补货分位数、容量门槛和缩容稳定窗口。
+4. **生产级安全库存**：加入短期速率、提前预测、补货分位数、容量门槛和缩容稳定窗口；
+   与 Controller 一样把最小库存归一化为 1。前三种策略仍允许 0，仅用于历史算法对比。
 
 以补货 40 秒、流量 2/s、最大等待 10 秒为例：
 
@@ -71,16 +72,21 @@ Controller 同时支持用户提出的三个简写注解：
 metadata:
   annotations:
     dynamic-pool: "true"
-    min-scale: "0"
+    min-scale: "1"
     max-scale: "10"
 ```
 
-也可以使用正式开关注解 `pool-autoscaling.bohr.io/enabled: "true"`。开启动态池后，
-需要部署支持动态池需求信号的 `sandbox-agent`：每次 claim 会递增 SandboxSet 上的
-`pool-autoscaling.bohr.io/demand-total` 并更新 `last-demand-time`。该路径强制
-`CreateOnNoStock=false`；没有 Ready 库存时当前请求立即返回 HTTP 503
-`sandbox set ... is not ready`，Controller 消费需求计数并把 0 库存至少扩到 1，
-客户端应在库存 Ready 后重试。
+也可以使用正式开关注解 `pool-autoscaling.bohr.io/enabled: "true"`。未配置
+`min-scale` 时默认保留 1 个库存；显式设置 `min-scale: "0"` 时允许空闲归零。
+零池唤醒必须至少具备一种需求信号：创建中的 `SandboxClaim`，或者业务请求入口写入
+下述带时间戳的 `pending-demand` 注解。
+
+如果业务要求禁止缺货冷创建，调用方必须使用 OpenKruise Agents 官方字段显式设置
+`createOnNoStock=false`。缺货时的等待、超时和 HTTP 状态码保持官方实现语义，本组件
+不把它改写为 HTTP 503。
+
+- SandboxClaim：`spec.createOnNoStock: false`；
+- E2B create metadata：`e2b.agents.kruise.io/create-on-no-stock: "false"`。
 
 还可以配置：
 
@@ -88,8 +94,11 @@ metadata:
 pool-autoscaling.bohr.io/sla-seconds: "10"
 pool-autoscaling.bohr.io/refill-seconds: "40"
 pool-autoscaling.bohr.io/service-quantile: "0.99"
+pool-autoscaling.bohr.io/fast-rate-window-seconds: "5"
+pool-autoscaling.bohr.io/medium-rate-window-seconds: "15"
 pool-autoscaling.bohr.io/rate-window-seconds: "60"
-pool-autoscaling.bohr.io/idle-to-zero-seconds: "600"
+pool-autoscaling.bohr.io/pending-demand-max-age-seconds: "30"
+pool-autoscaling.bohr.io/idle-to-min-seconds: "600"
 pool-autoscaling.bohr.io/safety-guard: "2"
 pool-autoscaling.bohr.io/refill-quantile: "0.95"
 pool-autoscaling.bohr.io/min-lead-samples: "5"
@@ -98,16 +107,32 @@ pool-autoscaling.bohr.io/capacity-utilization: "0.8"
 pool-autoscaling.bohr.io/supply-timeout-multiplier: "3"
 ```
 
-控制器合并统计每个模板近期 `SandboxClaim` 数量和 sandbox-manager 写入的单调需求
-计数，使用
-`rate × max(refill-SLA, 0) + z × sqrt(rate × refill) + guard`
-计算库存；需求上升时扩容，无请求超过 idle 时间后回落到 `min-scale`。
+为平滑迁移，旧的 `pool-autoscaling.bohr.io/idle-to-zero-seconds` 仍作为
+`idle-to-min-seconds` 的兼容别名读取。
+
+控制器分别计算 5 秒、15 秒和 60 秒窗口速率，采用三者最大值作为计划流量：
+
+`planned-rate = max(fast-rate, medium-rate, slow-rate)`
+
+`target-intent = lead-time inventory + safety stock + pending demand + guard`
+
+`SandboxClaim` 的未领取副本会自动计入 pending demand。直接 E2B 请求入口若还需要
+反馈缺货排队，应原子更新目标 SandboxSet 的以下两个注解：
+
+```yaml
+pool-autoscaling.bohr.io/pending-demand: "12"
+pool-autoscaling.bohr.io/pending-demand-updated-at: "2026-08-17T07:20:00Z"
+```
+
+时间戳超过 `pending-demand-max-age-seconds` 后信号自动失效，避免过期队列永久撑大
+库存。只要 pending demand 大于 0，算法立即进入 `SURGE`；完整队列债务进入
+`target-intent`，而 `maxUnavailable` 和补货超时只限制 `target-applied`。
 
 生产保护能力：
 
 - 从 Sandbox `Ready.lastTransitionTime - creationTimestamp` 自动学习补货时间分位数；
 - 样本和去重检查点写入 `sandbox-system/sandbox-pool-controller-state` ConfigMap，
-  Controller 重启或 leader 切换后不会重新学习，也不会重复消费需求计数；
+  Controller 重启或 leader 切换后不会重新学习；
 - 根据 `maxUnavailable × capacity-utilization / refill-P95` 计算供给吞吐上限，
   区分算法期望库存 `target-intent` 与实际放行库存 `target-applied`；
 - 在途 Sandbox 超过 `refill-P95 × supply-timeout-multiplier` 时进入 `DEGRADED`
@@ -118,8 +143,9 @@ pool-autoscaling.bohr.io/supply-timeout-multiplier: "3"
 
 算法状态和关键数值也会回写到 SandboxSet 的
 `pool-autoscaling.bohr.io/state`、`learned-refill-seconds`、`refill-source`、
-`refill-samples`、
-`demand-rate`、`supply-capacity-rate`、`target-intent` 和 `target-applied` 注解。
+`refill-samples`、`demand-rate-fast`、`demand-rate-medium`、`demand-rate-slow`、
+`pending-demand-observed`、`queue-boost`、`supply-capacity-rate`、
+`target-intent` 和 `target-applied` 注解。
 
 本地构建和部署：
 
@@ -143,3 +169,5 @@ kubectl apply -f ../deploy/controller.yaml
 - 补货耗时样本以 sandbox 完成为单位；同一批次可能高度相关，可切换
   `batch` 模式让整批共享一次时延样本。
 - 动态换镜像属于独立冷启动/原地升级路径，不计入正常自动扩缩容预测。
+- 生产动态池不缩到 0；0 库存按需唤醒属于未来能力，需等待官方提供可消费的失败需求
+  信号或采用独立的上层请求组件。

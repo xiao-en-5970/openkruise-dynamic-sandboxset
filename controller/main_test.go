@@ -114,45 +114,59 @@ func TestLeadTimeStateSurvivesControllerRestart(t *testing.T) {
 	}
 }
 
-func TestDirectDemandCounterIsConsumedOnceAndSurvivesRestart(t *testing.T) {
-	ctx := context.Background()
-	kube := fake.NewSimpleClientset()
-	poolID := "default/pool@uid"
-	now := time.Date(2026, 8, 6, 9, 0, 0, 0, time.UTC)
-	windowStart := now.Add(-time.Minute)
+func TestE2BDemandFromSandboxUsesOfficialClaimMetadata(t *testing.T) {
+	claimedAt := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		labels      map[string]string
+		annotations map[string]string
+		want        bool
+	}{
+		{
+			name: "sandbox-manager claim",
+			labels: map[string]string{
+				sandboxClaimedLabel: "true",
+			},
+			annotations: map[string]string{sandboxClaimTimeKey: claimedAt.Format(time.RFC3339)},
+			want:        true,
+		},
+		{
+			name: "SandboxClaim-owned sandbox is not double counted",
+			labels: map[string]string{
+				sandboxClaimedLabel:   "true",
+				sandboxClaimNameLabel: "batch-claim",
+			},
+			annotations: map[string]string{sandboxClaimTimeKey: claimedAt.Format(time.RFC3339)},
+		},
+		{
+			name:        "pool inventory is not demand",
+			labels:      map[string]string{sandboxClaimedLabel: "false"},
+			annotations: map[string]string{sandboxClaimTimeKey: claimedAt.Format(time.RFC3339)},
+		},
+		{
+			name:        "invalid timestamp is ignored",
+			labels:      map[string]string{sandboxClaimedLabel: "true"},
+			annotations: map[string]string{sandboxClaimTimeKey: "invalid"},
+		},
+	}
 
-	first := newStateStore(kube, "sandbox-system")
-	recent, latest := first.observeDemand(poolID, 5, now, windowStart)
-	if recent != 5 || !latest.Equal(now) {
-		t.Fatalf("unexpected first demand observation: recent=%d latest=%s", recent, latest)
-	}
-	recent, _ = first.observeDemand(poolID, 5, now, windowStart)
-	if recent != 5 {
-		t.Fatalf("unchanged counter must not be consumed twice, got %d", recent)
-	}
-	if err := first.save(ctx); err != nil {
-		t.Fatalf("save demand state: %v", err)
-	}
-
-	restarted := newStateStore(kube, "sandbox-system")
-	if err := restarted.load(ctx); err != nil {
-		t.Fatalf("load demand state: %v", err)
-	}
-	recent, _ = restarted.observeDemand(poolID, 5, now, windowStart)
-	if recent != 5 {
-		t.Fatalf("restart must not replay the persisted counter, got %d", recent)
-	}
-	recent, _ = restarted.observeDemand(poolID, 7, now.Add(time.Second), windowStart)
-	if recent != 7 {
-		t.Fatalf("expected only the counter delta to be appended, got %d", recent)
-	}
-	recent, latest = restarted.observeDemand(poolID, 7, now.Add(time.Second), now.Add(2*time.Second))
-	if recent != 0 || !latest.Equal(now.Add(time.Second)) {
-		t.Fatalf("expired samples should leave only idle timestamp: recent=%d latest=%s", recent, latest)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sandbox := &unstructured.Unstructured{}
+			sandbox.SetLabels(test.labels)
+			sandbox.SetAnnotations(test.annotations)
+			event, found := e2bDemandFromSandbox(sandbox)
+			if found != test.want {
+				t.Fatalf("found=%t, want %t", found, test.want)
+			}
+			if found && (!event.at.Equal(claimedAt) || event.replicas != 1) {
+				t.Fatalf("unexpected event: %+v", event)
+			}
+		})
 	}
 }
 
-func TestReconcilePoolActivatesFromDirectDemandWithoutSandboxClaim(t *testing.T) {
+func TestReconcilePoolRestoresNonZeroMinimumWithoutDemand(t *testing.T) {
 	now := time.Date(2026, 8, 6, 9, 0, 0, 0, time.UTC)
 	set := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "agents.kruise.io/v1alpha1",
@@ -163,11 +177,10 @@ func TestReconcilePoolActivatesFromDirectDemandWithoutSandboxClaim(t *testing.T)
 			"uid":               "pool-uid",
 			"creationTimestamp": now.Add(-time.Hour).Format(time.RFC3339),
 			"annotations": map[string]any{
-				enabledKey:        "true",
-				maxReplicasKey:    "1",
-				safetyGuardKey:    "0",
-				demandTotalKey:    "1",
-				lastDemandTimeKey: now.Format(time.RFC3339Nano),
+				enabledKey:     "true",
+				minReplicasKey: "1",
+				maxReplicasKey: "10",
+				safetyGuardKey: "0",
 			},
 		},
 		"spec": map[string]any{"replicas": int64(0)},
@@ -185,8 +198,8 @@ func TestReconcilePoolActivatesFromDirectDemandWithoutSandboxClaim(t *testing.T)
 		metrics: newMetricsRegistry(),
 	}
 
-	if err := ctrl.reconcilePool(context.Background(), set, nil, nil, now); err != nil {
-		t.Fatalf("reconcile direct demand: %v", err)
+	if err := ctrl.reconcilePool(context.Background(), set, nil, nil, 0, now); err != nil {
+		t.Fatalf("reconcile minimum inventory: %v", err)
 	}
 	updated, err := dynamicClient.Resource(sandboxSetGVR).Namespace("default").Get(
 		context.Background(), "dynamic-pool", metav1.GetOptions{},
@@ -196,13 +209,119 @@ func TestReconcilePoolActivatesFromDirectDemandWithoutSandboxClaim(t *testing.T)
 	}
 	replicas, found, err := unstructured.NestedInt64(updated.Object, "spec", "replicas")
 	if err != nil || !found || replicas != 1 {
-		t.Fatalf("direct demand must activate pool 0 -> 1, replicas=%d found=%t err=%v", replicas, found, err)
+		t.Fatalf("managed pool must restore its minimum inventory, replicas=%d found=%t err=%v", replicas, found, err)
 	}
 }
 
-func TestDirectDemandAnnotationsRequireTimestamp(t *testing.T) {
-	_, _, err := directDemandFromAnnotations(map[string]string{demandTotalKey: "1"})
-	if err == nil {
-		t.Fatal("positive direct demand without timestamp must be rejected")
+func TestDemandRateUsesFastMediumAndSlowWindows(t *testing.T) {
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	events := []demandEvent{
+		{at: now.Add(-2 * time.Second), replicas: 20},
+		{at: now.Add(-30 * time.Second), replicas: 60},
+	}
+	fast := demandRate(events, now, 5)
+	medium := demandRate(events, now, 15)
+	slow := demandRate(events, now, 60)
+	if fast < 9 || fast > 11 {
+		t.Fatalf("unexpected fast window rate: %f", fast)
+	}
+	if medium < 9 || medium > 11 {
+		t.Fatalf("unexpected medium window rate: %f", medium)
+	}
+	if slow >= fast {
+		t.Fatalf("slow window should dilute burst: fast=%f slow=%f", fast, slow)
+	}
+	if planned := max(fast, medium, slow); planned < 9 || planned > 11 {
+		t.Fatalf("planned rate must preserve the burst, got %f", planned)
+	}
+}
+
+func TestClaimPendingReplicasCountsOnlyActiveDebt(t *testing.T) {
+	pending := &unstructured.Unstructured{Object: map[string]any{
+		"status": map[string]any{
+			"phase":           "Pending",
+			"claimedReplicas": int64(2),
+		},
+	}}
+	if got := claimPendingReplicas(pending, 5); got != 3 {
+		t.Fatalf("expected three unfulfilled replicas, got %d", got)
+	}
+	completed := pending.DeepCopy()
+	_ = unstructured.SetNestedField(completed.Object, "Completed", "status", "phase")
+	if got := claimPendingReplicas(completed, 5); got != 0 {
+		t.Fatalf("completed claim must not remain queued, got %d", got)
+	}
+}
+
+func TestPendingDemandAnnotationRequiresFreshTimestamp(t *testing.T) {
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	fresh := map[string]string{
+		pendingDemandKey:     "7",
+		pendingDemandTimeKey: now.Add(-2 * time.Second).Format(time.RFC3339Nano),
+	}
+	pending, updatedAt := pendingDemandFromAnnotations(fresh, now, 30)
+	if pending != 7 || updatedAt.IsZero() {
+		t.Fatalf("fresh pending signal was not accepted: pending=%d updatedAt=%v", pending, updatedAt)
+	}
+	stale := map[string]string{
+		pendingDemandKey:     "7",
+		pendingDemandTimeKey: now.Add(-31 * time.Second).Format(time.RFC3339Nano),
+	}
+	pending, updatedAt = pendingDemandFromAnnotations(stale, now, 30)
+	if pending != 0 || !updatedAt.IsZero() {
+		t.Fatalf("stale pending signal must be ignored: pending=%d updatedAt=%v", pending, updatedAt)
+	}
+}
+
+func TestPendingDemandWakesZeroPoolAndBoostsIntent(t *testing.T) {
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	set := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "agents.kruise.io/v1alpha1",
+		"kind":       "SandboxSet",
+		"metadata": map[string]any{
+			"name":              "queue-aware",
+			"namespace":         "default",
+			"uid":               "queue-aware-uid",
+			"creationTimestamp": now.Add(-time.Hour).Format(time.RFC3339),
+			"annotations": map[string]any{
+				enabledKey:     "true",
+				minReplicasKey: "0",
+				maxReplicasKey: "50",
+				safetyGuardKey: "0",
+			},
+		},
+		"spec": map[string]any{"replicas": int64(0)},
+		"status": map[string]any{
+			"replicas":          int64(0),
+			"availableReplicas": int64(0),
+		},
+	}}
+	set.SetUID(types.UID("queue-aware-uid"))
+	set.SetCreationTimestamp(metav1.NewTime(now.Add(-time.Hour)))
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), set)
+	ctrl := &controller{
+		client:  dynamicClient,
+		state:   newStateStore(fake.NewSimpleClientset(), "sandbox-system"),
+		metrics: newMetricsRegistry(),
+	}
+
+	if err := ctrl.reconcilePool(context.Background(), set, nil, nil, 12, now); err != nil {
+		t.Fatalf("reconcile queued demand: %v", err)
+	}
+	updated, err := dynamicClient.Resource(sandboxSetGVR).Namespace("default").Get(
+		context.Background(), "queue-aware", metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("get updated SandboxSet: %v", err)
+	}
+	replicas, _, _ := unstructured.NestedInt64(updated.Object, "spec", "replicas")
+	if replicas != 12 {
+		t.Fatalf("queue debt should wake pool directly to 12, got %d", replicas)
+	}
+	annotations := updated.GetAnnotations()
+	if annotations[controllerStateKey] != "SURGE" ||
+		annotations[pendingObservedKey] != "12" ||
+		annotations[intentKey] != "12" {
+		t.Fatalf("unexpected queue-aware decision annotations: %#v", annotations)
 	}
 }

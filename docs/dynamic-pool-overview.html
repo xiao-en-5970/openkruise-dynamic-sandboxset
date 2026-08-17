@@ -1,0 +1,1578 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="基于 OpenKruise SandboxSet 的动态预热池项目介绍">
+  <title>Sandbox Dynamic Pool · 项目介绍</title>
+  <style>
+    :root {
+      --bg: #f4f1e9;
+      --surface: #fffdf7;
+      --surface-2: #e9eee9;
+      --ink: #142321;
+      --muted: #62706d;
+      --line: #d3d8d2;
+      --navy: #102927;
+      --teal: #087f74;
+      --teal-soft: #d7f3ec;
+      --amber: #b85f08;
+      --amber-soft: #fff0d6;
+      --red: #a53e35;
+      --red-soft: #ffe8e3;
+      --shadow: 0 18px 50px rgba(16, 41, 39, .09);
+      --radius: 22px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    :root[data-theme="dark"] {
+      --bg: #0b1513;
+      --surface: #13211f;
+      --surface-2: #1a2b28;
+      --ink: #edf5f2;
+      --muted: #a8b8b3;
+      --line: #30433e;
+      --navy: #07100f;
+      --teal: #33c3b2;
+      --teal-soft: #133b35;
+      --amber: #ffae57;
+      --amber-soft: #442b16;
+      --red: #ff9186;
+      --red-soft: #45231f;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .24);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 2%, rgba(8, 127, 116, .12), transparent 27rem),
+        radial-gradient(circle at 92% 30%, rgba(184, 95, 8, .08), transparent 24rem),
+        var(--bg);
+      font-family: var(--sans);
+      line-height: 1.65;
+    }
+
+    a { color: inherit; }
+    button, code { font: inherit; }
+    code {
+      padding: .15em .38em;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-2);
+      font-family: var(--mono);
+      font-size: .9em;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid color-mix(in srgb, var(--line), transparent 25%);
+      background: color-mix(in srgb, var(--bg), transparent 10%);
+      backdrop-filter: blur(18px);
+    }
+
+    .topbar-inner,
+    .hero-inner,
+    main,
+    footer {
+      width: min(1160px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .topbar-inner {
+      min-height: 66px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      text-decoration: none;
+      font-weight: 760;
+      letter-spacing: -.02em;
+    }
+
+    .brand-mark {
+      width: 13px;
+      height: 13px;
+      border-radius: 4px;
+      background: var(--teal);
+      box-shadow: 8px 8px 0 var(--amber);
+      transform: translateY(-4px);
+    }
+
+    nav { display: flex; gap: 22px; }
+    nav a {
+      color: var(--muted);
+      font-size: 14px;
+      text-decoration: none;
+    }
+    nav a:hover { color: var(--teal); }
+
+    .icon-button {
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--ink);
+      background: var(--surface);
+      cursor: pointer;
+    }
+
+    .hero {
+      padding: 86px 0 64px;
+      color: #f2faf7;
+      background:
+        linear-gradient(125deg, rgba(15, 63, 58, .96), rgba(7, 27, 25, .98)),
+        var(--navy);
+      overflow: hidden;
+    }
+
+    .hero-inner {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 72px;
+      align-items: end;
+    }
+
+    .hero-inner::after {
+      content: "";
+      position: absolute;
+      right: -100px;
+      bottom: -190px;
+      width: 430px;
+      height: 430px;
+      border: 1px solid rgba(95, 218, 199, .22);
+      border-radius: 50%;
+      box-shadow: 0 0 0 70px rgba(95, 218, 199, .05),
+        0 0 0 145px rgba(95, 218, 199, .03);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      color: #79ddce;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 780px;
+      margin: 18px 0 20px;
+      font-size: clamp(46px, 7vw, 86px);
+      line-height: .98;
+      letter-spacing: -.065em;
+    }
+
+    .hero-lead {
+      max-width: 730px;
+      margin: 0;
+      color: #c8d9d5;
+      font-size: clamp(17px, 2vw, 21px);
+    }
+
+    .hero-summary {
+      position: relative;
+      z-index: 1;
+      padding: 22px;
+      border: 1px solid rgba(157, 221, 211, .22);
+      border-radius: var(--radius);
+      background: rgba(9, 31, 29, .58);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .18);
+    }
+
+    .hero-summary span {
+      display: block;
+      color: #78daca;
+      font-family: var(--mono);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .hero-summary strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 23px;
+      line-height: 1.3;
+    }
+
+    main { padding: 34px 0 96px; }
+    section {
+      padding: 58px 0;
+      scroll-margin-top: 72px;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: 1fr minmax(280px, 470px);
+      gap: 44px;
+      align-items: end;
+      margin-bottom: 26px;
+    }
+
+    .section-index {
+      margin-bottom: 10px;
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(31px, 4.5vw, 54px);
+      line-height: 1.08;
+      letter-spacing: -.045em;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      line-height: 1.3;
+    }
+
+    p { margin: 0; }
+    .section-intro { color: var(--muted); }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: color-mix(in srgb, var(--surface), transparent 3%);
+      box-shadow: var(--shadow);
+    }
+
+    .premise {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 26px;
+      padding: 30px;
+      border-color: color-mix(in srgb, var(--amber), var(--line) 55%);
+      background: linear-gradient(135deg, var(--amber-soft), var(--surface));
+    }
+
+    .premise-label {
+      align-self: start;
+      padding: 9px 12px;
+      border-radius: 999px;
+      color: var(--amber);
+      background: color-mix(in srgb, var(--amber-soft), var(--surface) 20%);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .premise strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: clamp(22px, 3vw, 33px);
+      line-height: 1.25;
+      letter-spacing: -.025em;
+    }
+
+    .premise p { color: var(--muted); }
+
+    .capability-grid,
+    .role-grid,
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .capability {
+      padding: 25px;
+    }
+
+    .capability-num {
+      display: inline-flex;
+      width: 34px;
+      height: 34px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 32px;
+      border-radius: 10px;
+      color: var(--teal);
+      background: var(--teal-soft);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .capability p,
+    .role-card p,
+    .mode-card p {
+      color: var(--muted);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 18px;
+    }
+
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+    }
+
+    .step-button {
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 12px;
+      align-items: center;
+      width: 100%;
+      padding: 13px;
+      border: 1px solid transparent;
+      border-radius: 14px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .step-button:hover,
+    .step-button.active {
+      border-color: var(--line);
+      color: var(--ink);
+      background: var(--surface-2);
+    }
+
+    .step-button span:first-child {
+      display: inline-flex;
+      width: 34px;
+      height: 34px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      color: var(--teal);
+      background: var(--teal-soft);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .step-detail {
+      min-height: 390px;
+      padding: 34px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+
+    .step-tag {
+      display: inline-flex;
+      align-self: flex-start;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: var(--teal);
+      background: var(--teal-soft);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .step-detail h3 {
+      margin-top: 18px;
+      font-size: clamp(28px, 4vw, 46px);
+      letter-spacing: -.04em;
+    }
+
+    .step-detail-copy {
+      max-width: 700px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .state-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 32px;
+    }
+
+    .state-cell {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+
+    .state-cell span {
+      display: block;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .state-cell strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 19px;
+    }
+
+    .role-card,
+    .mode-card {
+      padding: 26px;
+    }
+
+    .role-card.upstream { border-top: 5px solid var(--amber); }
+    .role-card.controller { border-top: 5px solid var(--teal); }
+    .role-card.caller { border-top: 5px solid #5874b7; }
+
+    .role-tag {
+      display: inline-block;
+      margin-bottom: 22px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .mode-card {
+      position: relative;
+      min-height: 205px;
+    }
+
+    .mode-card.recommended {
+      border-color: color-mix(in srgb, var(--teal), var(--line) 50%);
+      background: linear-gradient(145deg, var(--teal-soft), var(--surface));
+    }
+
+    .mode-pill {
+      display: inline-block;
+      margin-bottom: 24px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: var(--teal);
+      background: var(--teal-soft);
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .demo-window {
+      overflow: hidden;
+      border-color: color-mix(in srgb, var(--teal), var(--line) 62%);
+    }
+
+    .demo-titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 13px 17px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+
+    .window-dots {
+      display: flex;
+      gap: 7px;
+    }
+
+    .window-dots i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--line);
+    }
+
+    .window-dots i:first-child { background: #ef7468; }
+    .window-dots i:nth-child(2) { background: #e8b84f; }
+    .window-dots i:last-child { background: #59b879; }
+
+    .demo-titlebar strong {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: .03em;
+    }
+
+    .demo-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .demo-button {
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      color: var(--ink);
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .demo-button.primary {
+      border-color: var(--teal);
+      color: #fff;
+      background: var(--teal);
+    }
+
+    .demo-button:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    .demo-context {
+      display: grid;
+      grid-template-columns: 150px 1fr 130px;
+      gap: 14px;
+      align-items: center;
+      padding: 17px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .demo-context span {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .request-pulse {
+      position: relative;
+      height: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--surface-2);
+    }
+
+    .request-pulse::after {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: var(--pulse-width, 0%);
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--teal), var(--amber));
+      transition: width .35s ease;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .pool-demo {
+      min-width: 0;
+      padding: 22px;
+    }
+
+    .pool-demo + .pool-demo { border-left: 1px solid var(--line); }
+
+    .pool-demo.dynamic {
+      background: linear-gradient(150deg, color-mix(in srgb, var(--teal-soft), transparent 30%), transparent 58%);
+    }
+
+    .pool-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 20px;
+    }
+
+    .pool-kicker {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .pool-state {
+      padding: 5px 8px;
+      border-radius: 999px;
+      color: var(--amber);
+      background: var(--amber-soft);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .dynamic .pool-state {
+      color: var(--teal);
+      background: var(--teal-soft);
+    }
+
+    .sandbox-slots {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(22px, 1fr));
+      gap: 7px;
+      min-height: 53px;
+      margin-bottom: 18px;
+    }
+
+    .sandbox-slot {
+      height: 46px;
+      border: 1px dashed var(--line);
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--surface-2), transparent 30%);
+      transition: transform .2s ease, background .2s ease;
+    }
+
+    .sandbox-slot.ready {
+      border-style: solid;
+      border-color: color-mix(in srgb, var(--teal), var(--line) 35%);
+      background: var(--teal-soft);
+    }
+
+    .sandbox-slot.creating {
+      border-style: solid;
+      border-color: color-mix(in srgb, var(--amber), var(--line) 35%);
+      background: repeating-linear-gradient(135deg, var(--amber-soft), var(--amber-soft) 5px, var(--surface) 5px, var(--surface) 10px);
+    }
+
+    .sandbox-slot.cold {
+      border-style: solid;
+      border-color: color-mix(in srgb, var(--red), var(--line) 35%);
+      background: var(--red-soft);
+    }
+
+    .demo-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+    }
+
+    .demo-metric {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--surface), transparent 22%);
+    }
+
+    .demo-metric span {
+      display: block;
+      overflow: hidden;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .demo-metric strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 18px;
+    }
+
+    .demo-log {
+      min-height: 75px;
+      padding: 17px 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      background: var(--surface-2);
+      font-size: 13px;
+    }
+
+    .demo-log strong { color: var(--ink); }
+
+    .demo-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 10px 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .demo-legend span::before {
+      content: "";
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      margin-right: 6px;
+      border-radius: 3px;
+      vertical-align: -1px;
+      background: var(--line);
+    }
+
+    .demo-legend .ready::before { background: var(--teal); }
+    .demo-legend .creating::before { background: var(--amber); }
+    .demo-legend .cold::before { background: var(--red); }
+
+    .object-chain {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .object-node {
+      position: relative;
+      padding: 19px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+    }
+
+    .object-node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -17px;
+      z-index: 1;
+      width: 24px;
+      color: var(--teal);
+      background: var(--bg);
+      text-align: center;
+      transform: translateY(-50%);
+    }
+
+    .object-node span {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .object-node p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .formula {
+      margin-top: 18px;
+      padding: 24px;
+      overflow-x: auto;
+      color: #eaf7f3;
+      background: var(--navy);
+      font-family: var(--mono);
+      font-size: clamp(14px, 2vw, 18px);
+    }
+
+    .formula-line {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 1120px;
+      white-space: nowrap;
+    }
+
+    .formula-name {
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .formula-part {
+      padding: 8px 11px;
+      border: 1px solid rgba(255, 255, 255, .14);
+      border-radius: 10px;
+      font-weight: 750;
+    }
+
+    .formula-part.base { color: #8ee2d3; background: rgba(8, 127, 116, .2); }
+    .formula-part.safety { color: #ffd08d; background: rgba(184, 95, 8, .2); }
+    .formula-part.guard { color: #aebfff; background: rgba(88, 116, 183, .22); }
+    .formula-op { color: #8aa09a; }
+
+    .formula-clamp {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, .12);
+      color: #aec3bd;
+      font-size: 13px;
+    }
+
+    .formula-notes {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .formula-note {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+    }
+
+    .formula-note span {
+      display: block;
+      margin-bottom: 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .formula-note.base span { color: var(--teal); }
+    .formula-note.safety span { color: var(--amber); }
+    .formula-note.guard span { color: #5874b7; }
+    .formula-note p { color: var(--muted); font-size: 13px; }
+
+    .formula-detail {
+      display: grid;
+      grid-template-columns: 1.05fr .95fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .variable-list,
+    .worked-example,
+    .supply-gate {
+      padding: 24px;
+    }
+
+    .variable-list h3,
+    .worked-example h3,
+    .supply-gate h3 { margin-bottom: 16px; }
+
+    .variable-row {
+      display: grid;
+      grid-template-columns: 74px 1fr;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .variable-row code {
+      align-self: start;
+      color: var(--teal);
+      text-align: center;
+    }
+
+    .example-equation {
+      display: grid;
+      gap: 9px;
+      margin-top: 16px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .example-equation div {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 9px 11px;
+      border-radius: 9px;
+      background: var(--surface-2);
+    }
+
+    .example-equation strong { color: var(--teal); }
+
+    .example-result {
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 12px;
+      color: var(--teal);
+      background: var(--teal-soft);
+      font-weight: 800;
+    }
+
+    .supply-gate {
+      margin-top: 16px;
+      border-left: 5px solid var(--teal);
+    }
+
+    .supply-gate p { color: var(--muted); }
+
+    .supply-code {
+      display: block;
+      margin-top: 14px;
+      padding: 13px;
+      overflow-x: auto;
+      border: 0;
+      color: #eaf7f3;
+      background: var(--navy);
+      white-space: nowrap;
+    }
+
+    footer {
+      padding: 30px 0 46px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      nav { display: none; }
+      .hero-inner,
+      .section-head,
+      .flow,
+      .demo-grid {
+        grid-template-columns: 1fr;
+      }
+      .hero-summary { max-width: 540px; }
+      .capability-grid,
+      .role-grid,
+      .mode-grid {
+        grid-template-columns: 1fr;
+      }
+      .step-detail { min-height: 350px; }
+      .pool-demo + .pool-demo {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+      .object-chain { grid-template-columns: 1fr 1fr; }
+      .object-node::after { display: none; }
+      .formula-notes,
+      .formula-detail { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 600px) {
+      .topbar-inner,
+      .hero-inner,
+      main,
+      footer {
+        width: min(100% - 24px, 1160px);
+      }
+      .hero { padding: 64px 0 46px; }
+      section { padding: 43px 0; }
+      .premise { grid-template-columns: 1fr; }
+      .state-strip { grid-template-columns: 1fr; }
+      .step-detail { padding: 24px; }
+      .demo-titlebar,
+      .demo-context {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .demo-titlebar { display: flex; }
+      .demo-context { grid-template-columns: 1fr; }
+      .demo-controls { flex-wrap: wrap; }
+      .object-chain { grid-template-columns: 1fr; }
+      .formula { padding: 18px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#top">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Sandbox Dynamic Pool</span>
+      </a>
+      <nav aria-label="页面导航">
+        <a href="#about">项目</a>
+        <a href="#contract">运行契约</a>
+        <a href="#comparison">对比模拟</a>
+        <a href="#lifecycle">0→1 流程</a>
+        <a href="#roles">职责边界</a>
+        <a href="#model">对象模型</a>
+        <a href="#modes">运行模式</a>
+      </nav>
+      <button class="icon-button" id="themeToggle" type="button" aria-label="切换明暗主题">◐</button>
+    </div>
+  </header>
+
+  <header class="hero" id="top">
+    <div class="hero-inner">
+      <div>
+        <div class="eyebrow">OpenKruise SandboxSet · External Pool Controller</div>
+        <h1>把沙盒冷启动<br>变成预热池扩容</h1>
+        <p class="hero-lead">
+          Sandbox Dynamic Pool 是一个运行在 OpenKruise Agents 之上的外置控制器。
+          它根据请求需求和实际补货能力调整 SandboxSet 库存，让用户请求尽量只领取
+          已经 Ready 的沙盒。
+        </p>
+      </div>
+      <aside class="hero-summary">
+        <span>核心转换</span>
+        <strong>请求路径冷创建<br>→ SandboxSet scale 0→1<br>→ Ready 后领取</strong>
+      </aside>
+    </div>
+  </header>
+
+  <main>
+    <section id="about">
+      <div class="section-head">
+        <div>
+          <div class="section-index">01 / What it is</div>
+          <h2>项目围绕动态库存建立完整控制闭环</h2>
+        </div>
+        <p class="section-intro">
+          项目连接 OpenKruise 的领取生命周期与 SandboxSet 库存，通过需求观测、目标计算、
+          自动补货和缩容回落，让用户请求优先获得已经 Ready 的沙盒。
+        </p>
+      </div>
+
+      <div class="capability-grid">
+        <article class="card capability">
+          <span class="capability-num">01</span>
+          <h3>需求驱动</h3>
+          <p>按模板汇总近期请求，计算应该保留多少 Ready 库存，而不是为每个请求单独创建沙盒。</p>
+        </article>
+        <article class="card capability">
+          <span class="capability-num">02</span>
+          <h3>供给保护</h3>
+          <p>结合补货时延、最大并发补货数和超时状态，限制每轮实际放行的扩容量。</p>
+        </article>
+        <article class="card capability">
+          <span class="capability-num">03</span>
+          <h3>自动回落</h3>
+          <p>需求消退后自动回落并 scale to zero；下一次真实请求会再次触发 0→1 唤醒。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="contract">
+      <div class="section-head">
+        <div>
+          <div class="section-index">02 / Runtime contract</div>
+          <h2>缺货请求进入预热池唤醒流程</h2>
+        </div>
+        <p class="section-intro">
+          OpenKruise 负责 Ready-only 领取和需求记录，Dynamic Pool Controller 负责把需求
+          转换为 SandboxSet 扩容，两者组成一个清晰的 0→1 运行契约。
+        </p>
+      </div>
+
+      <article class="card premise">
+        <span class="premise-label">领取契约</span>
+        <div>
+          <strong>SandboxSet 没有 Ready 库存时，领取入口拦截请求并记录目标池需求。</strong>
+          <p>
+            Ready-only / <code>createOnNoStock=false</code> 保证请求只领取预热库存；
+            缺货需求关联到目标 SandboxSet。Controller 收到信号后扩展库存，Sandbox 在池内
+            完成 Ready，随后请求继续领取。
+          </p>
+        </div>
+      </article>
+    </section>
+
+    <section id="comparison">
+      <div class="section-head">
+        <div>
+          <div class="section-index">03 / Side-by-side simulation</div>
+          <h2>同一波请求，固定池和动态池会发生什么</h2>
+        </div>
+        <p class="section-intro">
+          固定池长期支付底仓成本，突发超过库存后仍会进入冷创建；动态池允许空闲归零，
+          缺货时拦截请求并把创建转移到 SandboxSet 补货路径。点击“下一步”查看完整过程。
+        </p>
+      </div>
+
+      <div class="card demo-window">
+        <div class="demo-titlebar">
+          <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+          <strong>burst-demo · fixed pool vs dynamic pool</strong>
+          <div class="demo-controls">
+            <button class="demo-button" id="demoReset" type="button">重置</button>
+            <button class="demo-button" id="demoStep" type="button">下一步</button>
+            <button class="demo-button primary" id="demoPlay" type="button">自动演示</button>
+          </div>
+        </div>
+
+        <div class="demo-context">
+          <span id="demoTime">T+0 · 空闲</span>
+          <div class="request-pulse" id="requestPulse" style="--pulse-width:0%" aria-label="当前请求强度"></div>
+          <span>新请求 <strong id="demoArrivals">0</strong></span>
+        </div>
+
+        <div class="demo-grid">
+          <article class="pool-demo fixed">
+            <div class="pool-head">
+              <div><span class="pool-kicker">原始方案</span><h3>固定池 · replicas=4</h3></div>
+              <span class="pool-state" id="fixedState">持续占用</span>
+            </div>
+            <div class="sandbox-slots" id="fixedSlots" aria-label="固定池库存格"></div>
+            <div class="demo-metrics">
+              <div class="demo-metric"><span>Ready</span><strong id="fixedReady">4</strong></div>
+              <div class="demo-metric"><span>冷创建</span><strong id="fixedCold">0</strong></div>
+              <div class="demo-metric"><span>累计成本</span><strong id="fixedCost">4</strong></div>
+            </div>
+          </article>
+
+          <article class="pool-demo dynamic">
+            <div class="pool-head">
+              <div><span class="pool-kicker">当前项目</span><h3>动态池 · demand 0→1</h3></div>
+              <span class="pool-state" id="dynamicState">scale to zero</span>
+            </div>
+            <div class="sandbox-slots" id="dynamicSlots" aria-label="动态池库存格"></div>
+            <div class="demo-metrics">
+              <div class="demo-metric"><span>就绪 / 补货中</span><strong id="dynamicSupply">0 / 0</strong></div>
+              <div class="demo-metric"><span>等待请求</span><strong id="dynamicWaiting">0</strong></div>
+              <div class="demo-metric"><span>累计成本</span><strong id="dynamicCost">0</strong></div>
+            </div>
+          </article>
+        </div>
+
+        <div class="demo-legend" aria-label="库存格图例">
+          <span class="ready">Ready 库存</span>
+          <span class="creating">正在补货</span>
+          <span class="cold">请求路径冷创建</span>
+          <span>空闲槽位</span>
+        </div>
+
+        <div class="demo-log" id="demoLog" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section id="lifecycle">
+      <div class="section-head">
+        <div>
+          <div class="section-index">04 / Request lifecycle</div>
+          <h2>一次冷请求如何转成 scale 0→1</h2>
+        </div>
+        <p class="section-intro">
+          点击步骤查看职责变化。业务请求不会在缺货瞬间创建 Sandbox，而是推动预热池先恢复库存。
+        </p>
+      </div>
+
+      <div class="flow">
+        <div class="card step-list" id="stepList" aria-label="0 到 1 生命周期步骤"></div>
+        <article class="card step-detail" aria-live="polite">
+          <div>
+            <span class="step-tag" id="stepTag"></span>
+            <h3 id="stepTitle"></h3>
+            <p class="step-detail-copy" id="stepCopy"></p>
+          </div>
+          <div class="state-strip">
+            <div class="state-cell"><span>SandboxSet replicas</span><strong id="stepReplicas"></strong></div>
+            <div class="state-cell"><span>Ready inventory</span><strong id="stepReady"></strong></div>
+            <div class="state-cell"><span>Request state</span><strong id="stepRequest"></strong></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="roles">
+      <div class="section-head">
+        <div>
+          <div class="section-index">05 / Responsibility boundary</div>
+          <h2>三方协作，但边界必须清楚</h2>
+        </div>
+        <p class="section-intro">
+          OpenKruise 提供领取与 Sandbox 生命周期，外置 Controller 专注需求聚合、库存计算、
+          供给保护和 SandboxSet 扩缩容。
+        </p>
+      </div>
+
+      <div class="role-grid">
+        <article class="card role-card upstream">
+          <span class="role-tag">OpenKruise Agents</span>
+          <h3>拦截冷创建</h3>
+          <p>只从 Ready 库存领取；缺货时不直接创建业务 Sandbox，并暴露可关联到 SandboxSet 的需求信号。</p>
+        </article>
+        <article class="card role-card controller">
+          <span class="role-tag">Dynamic Pool Controller</span>
+          <h3>计算并补货</h3>
+          <p>汇总需求、学习补货时延、计算理想库存与实际库存目标，并更新 <code>SandboxSet.spec.replicas</code>。</p>
+        </article>
+        <article class="card role-card caller">
+          <span class="role-tag">Caller / Gateway</span>
+          <h3>等待或重试</h3>
+          <p>显式选择禁止缺货冷创建；在库存 Ready 后继续领取，不把失败请求绕回普通冷创建路径。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="model">
+      <div class="section-head">
+        <div>
+          <div class="section-index">06 / Control model</div>
+          <h2>控制回路围绕四类信息工作</h2>
+        </div>
+        <p class="section-intro">
+          Controller 通过 Kubernetes 对象获取需求和供给快照，计算目标库存并驱动
+          SandboxSet 扩缩容。
+        </p>
+      </div>
+
+      <div class="object-chain">
+        <article class="object-node">
+          <span>DEMAND</span>
+          <h3>请求信号</h3>
+          <p>SandboxClaim、成功领取记录，以及领取入口记录的缺货需求。</p>
+        </article>
+        <article class="object-node">
+          <span>SUPPLY</span>
+          <h3>库存状态</h3>
+          <p>Sandbox 的 Ready、Creating、创建时间和补货完成时间。</p>
+        </article>
+        <article class="object-node">
+          <span>DECISION</span>
+          <h3>库存算法</h3>
+          <p>结合需求速率、补货分位数、允许等待时长、安全库存和供给并发。</p>
+        </article>
+        <article class="object-node">
+          <span>ACTUATOR</span>
+          <h3>SandboxSet</h3>
+          <p>把最终实际库存目标写入 <code>spec.replicas</code>，由 OpenKruise 完成创建。</p>
+        </article>
+      </div>
+
+      <div class="card formula" aria-label="目标库存公式">
+        <div class="formula-line">
+          <span class="formula-name">原始库存目标</span>
+          <span class="formula-op">= 向上取整(</span>
+          <span class="formula-part base">需求速率 × 最大值(补货时长 − 允许等待时长, 0)</span>
+          <span class="formula-op">+</span>
+          <span class="formula-part safety">服务系数 × √(需求速率 × 补货时长)</span>
+          <span class="formula-op">) +</span>
+          <span class="formula-part guard">安全底仓</span>
+        </div>
+        <div class="formula-clamp">理想库存目标 = 限制在区间(原始库存目标, 最小库存, 最大库存)</div>
+      </div>
+
+      <div class="formula-notes">
+        <article class="formula-note base">
+          <span>01 · 确定性库存</span>
+          <h3>覆盖补货缺口</h3>
+          <p><code>需求速率 × 最大值(补货时长 − 允许等待时长, 0)</code> 表示补货期间扣除可等待时间后，预计还需要立即承接的请求数量。</p>
+        </article>
+        <article class="formula-note safety">
+          <span>02 · 随机安全库存</span>
+          <h3>吸收流量波动</h3>
+          <p><code>服务系数 × √(需求速率 × 补货时长)</code> 为泊松近似下的波动余量。目标服务分位数越高，服务系数越大。</p>
+        </article>
+        <article class="formula-note guard">
+          <span>03 · 固定底仓</span>
+          <h3>抵御模型误差</h3>
+          <p><code>安全底仓</code> 是额外保留的固定实例数，用来覆盖短窗口少计、调度抖动和补货样本不足等误差。</p>
+        </article>
+      </div>
+
+      <div class="formula-detail">
+        <article class="card variable-list">
+          <h3>变量分别代表什么</h3>
+          <div class="variable-row"><code>需求速率</code><span>近期每秒请求数，来自需求时间窗口的统计。</span></div>
+          <div class="variable-row"><code>补货时长</code><span>Sandbox 从创建到 Ready 的时间，通常取历史 P95 等保守分位数。</span></div>
+          <div class="variable-row"><code>允许等待</code><span>业务允许用户等待库存的最长时间；允许等待越久，确定性库存可以越小。</span></div>
+          <div class="variable-row"><code>服务系数</code><span>目标服务分位数对应的标准正态系数，例如 P99 约为 2.33。</span></div>
+          <div class="variable-row"><code>安全底仓</code><span>额外保留的固定库存，由运维结合模板稳定性和流量误差配置。</span></div>
+        </article>
+
+        <article class="card worked-example">
+          <h3>数值例子</h3>
+          <p class="section-intro">假设需求速率为 2 次/秒、补货时长为 40 秒、允许等待 10 秒、目标 P99（服务系数约 2.33）、安全底仓为 2。</p>
+          <div class="example-equation">
+            <div><span>确定性库存</span><strong>2 × (40−10) = 60</strong></div>
+            <div><span>随机安全库存</span><strong>2.33 × √80 ≈ 20.8</strong></div>
+            <div><span>向上取整 + 安全底仓</span><strong>向上取整(80.8) + 2</strong></div>
+          </div>
+          <div class="example-result">最终理想库存目标 = 83</div>
+        </article>
+      </div>
+
+      <article class="card supply-gate">
+        <h3>理想库存还不是本轮真正写入的副本数</h3>
+        <p>
+          公式先给出需求侧的理想库存目标。Controller 还会根据最大并发补货数、当前补货中数量
+          和供给超时计算可创建槽位，得到实际库存目标，避免一次扩容压垮调度器或镜像仓库。
+        </p>
+        <code class="supply-code">可创建槽位 = 最大值(0, 向下取整(最大并发补货数 × 利用率) − 补货中数量) · 实际库存目标 = 最小值(理想库存目标, 最大值(当前库存目标, 实际副本数 + 可创建槽位))</code>
+      </article>
+    </section>
+
+    <section id="modes">
+      <div class="section-head">
+        <div>
+          <div class="section-index">07 / Operating modes</div>
+          <h2>项目提供三层动态库存能力</h2>
+        </div>
+        <p class="section-intro">
+          从请求到达到库存 Ready，控制器同时管理唤醒速度、库存规模和供给安全。
+        </p>
+      </div>
+
+      <div class="mode-grid">
+        <article class="card mode-card recommended">
+          <span class="mode-pill">按需唤醒</span>
+          <h3>Scale 0→1</h3>
+          <p>空闲期库存归零；缺货请求记录需求并唤醒 SandboxSet，Ready 后完成领取。</p>
+        </article>
+        <article class="card mode-card">
+          <span class="mode-pill">动态定容</span>
+          <h3>按流量扩缩</h3>
+          <p>结合需求速率、补货时延、允许等待时长和安全库存，持续计算合理的库存目标。</p>
+        </article>
+        <article class="card mode-card">
+          <span class="mode-pill">供给保护</span>
+          <h3>安全补货</h3>
+          <p>通过并发槽位、补货分位数和超时状态限制实际库存目标，避免突发扩容压垮底层供给。</p>
+        </article>
+      </div>
+
+    </section>
+  </main>
+
+  <footer>
+    Sandbox Dynamic Pool · 基于 OpenKruise SandboxSet 的外置动态预热池控制器
+  </footer>
+
+  <script>
+    "use strict";
+
+    const steps = [
+      {
+        tag: "空闲",
+        title: "预热池缩到 0",
+        copy: "没有近期需求，SandboxSet 的库存目标回落到 0。此时没有 Ready Sandbox，等待下一次真实需求唤醒。",
+        replicas: "0",
+        ready: "0",
+        request: "—"
+      },
+      {
+        tag: "请求入口",
+        title: "用户请求到达空池",
+        copy: "调用方显式关闭 create-on-no-stock。OpenKruise 发现没有 Ready 候选，但不会走普通冷创建分支。",
+        replicas: "0",
+        ready: "0",
+        request: "等待 / 可重试"
+      },
+      {
+        tag: "OpenKruise 领取入口",
+        title: "拦截冷创建并记录需求",
+        copy: "缺货请求被关联到目标 SandboxSet，并形成外置 Controller 可以稳定观察的需求信号。这里是整个 0→1 闭环的必要接口。",
+        replicas: "0",
+        ready: "0",
+        request: "已记录"
+      },
+      {
+        tag: "外置 Controller",
+        title: "把需求转换为 scale 0→1",
+        copy: "Controller 消费需求，计算库存目标并更新 SandboxSet.spec.replicas。Sandbox 的创建由 OpenKruise 预热池控制回路发起。",
+        replicas: "1",
+        ready: "0",
+        request: "等待库存"
+      },
+      {
+        tag: "预热阶段",
+        title: "Sandbox 在池内完成 Ready",
+        copy: "镜像、运行时和健康检查在业务领取之前完成。补货耗时会进入后续库存计算和供给保护。",
+        replicas: "1",
+        ready: "1",
+        request: "可继续"
+      },
+      {
+        tag: "领取",
+        title: "请求领取 Ready Sandbox",
+        copy: "调用方继续或重试后命中 Ready 库存。业务 Sandbox 离开未分配池，Controller 再根据目标库存补货。",
+        replicas: "1",
+        ready: "0 + 补货中",
+        request: "成功"
+      }
+    ];
+
+    const list = document.querySelector("#stepList");
+    const fields = {
+      tag: document.querySelector("#stepTag"),
+      title: document.querySelector("#stepTitle"),
+      copy: document.querySelector("#stepCopy"),
+      replicas: document.querySelector("#stepReplicas"),
+      ready: document.querySelector("#stepReady"),
+      request: document.querySelector("#stepRequest")
+    };
+
+    function renderStep(index) {
+      const step = steps[index];
+      fields.tag.textContent = `STEP ${String(index + 1).padStart(2, "0")} · ${step.tag}`;
+      fields.title.textContent = step.title;
+      fields.copy.textContent = step.copy;
+      fields.replicas.textContent = step.replicas;
+      fields.ready.textContent = step.ready;
+      fields.request.textContent = step.request;
+      document.querySelectorAll(".step-button").forEach((button, buttonIndex) => {
+        button.classList.toggle("active", buttonIndex === index);
+        button.setAttribute("aria-current", buttonIndex === index ? "step" : "false");
+      });
+    }
+
+    list.innerHTML = steps.map((step, index) => `
+      <button class="step-button" type="button" data-index="${index}">
+        <span>${String(index + 1).padStart(2, "0")}</span>
+        <strong>${step.title}</strong>
+      </button>
+    `).join("");
+
+    document.querySelectorAll(".step-button").forEach(button => {
+      button.addEventListener("click", () => renderStep(Number(button.dataset.index)));
+    });
+
+    const demoFrames = [
+      {
+        time: "T+0 · 空闲", arrivals: 0, pulse: 0,
+        fixed: {ready: 4, cold: 0, cost: 4, state: "持续占用", slots: ["ready", "ready", "ready", "ready"]},
+        dynamic: {ready: 0, creating: 0, waiting: 0, cost: 0, state: "空闲归零", slots: []},
+        log: "<strong>空闲期：</strong>固定池始终保留 4 个 Ready 沙盒；动态池根据需求窗口自动缩到 0。"
+      },
+      {
+        time: "T+1 · 首个请求", arrivals: 1, pulse: 18,
+        fixed: {ready: 3, cold: 0, cost: 8, state: "即时领取", slots: ["ready", "ready", "ready", "creating"]},
+        dynamic: {ready: 0, creating: 0, waiting: 1, cost: 0, state: "拦截缺货", slots: []},
+        log: "<strong>请求到达：</strong>固定池用常驻库存立即交付；动态池没有 Ready 库存，OpenKruise 拦截冷创建并保留请求。"
+      },
+      {
+        time: "T+2 · 需求唤醒", arrivals: 0, pulse: 8,
+        fixed: {ready: 3, cold: 0, cost: 12, state: "固定补位", slots: ["ready", "ready", "ready", "creating"]},
+        dynamic: {ready: 0, creating: 1, waiting: 1, cost: 1, state: "scale 0→1", slots: ["creating"]},
+        log: "<strong>需求信号：</strong>动态 Controller 将缺货需求转换为 SandboxSet replicas 0→1；创建发生在预热池补货路径。"
+      },
+      {
+        time: "T+3 · 突发流量", arrivals: 5, pulse: 100,
+        fixed: {ready: 0, cold: 1, cost: 16, state: "库存击穿", slots: ["creating", "creating", "creating", "creating", "cold"]},
+        dynamic: {ready: 0, creating: 6, waiting: 6, cost: 7, state: "扩容到 6", slots: ["creating", "creating", "creating", "creating", "creating", "creating"]},
+        log: "<strong>突发超过底仓：</strong>固定池交付 4 个后仍有 1 个进入冷创建；动态池累计 6 个等待请求并扩展预热库存。"
+      },
+      {
+        time: "T+4 · 补货完成", arrivals: 0, pulse: 36,
+        fixed: {ready: 4, cold: 1, cost: 20, state: "恢复固定值", slots: ["ready", "ready", "ready", "ready"]},
+        dynamic: {ready: 6, creating: 0, waiting: 6, cost: 13, state: "库存 Ready", slots: ["ready", "ready", "ready", "ready", "ready", "ready"]},
+        log: "<strong>Ready：</strong>动态池在业务领取前完成镜像、运行时和健康检查；等待请求现在可以只领取 Ready 沙盒。"
+      },
+      {
+        time: "T+5 · 批量领取", arrivals: 0, pulse: 18,
+        fixed: {ready: 4, cold: 1, cost: 24, state: "固定值", slots: ["ready", "ready", "ready", "ready"]},
+        dynamic: {ready: 0, creating: 6, waiting: 0, cost: 19, state: "领取并补货", slots: ["creating", "creating", "creating", "creating", "creating", "creating"]},
+        log: "<strong>领取完成：</strong>6 个请求从 Ready 池领取，业务 Sandbox 离池；Controller 根据需求窗口继续补货。"
+      },
+      {
+        time: "T+6 · 流量消退", arrivals: 0, pulse: 4,
+        fixed: {ready: 4, cold: 1, cost: 28, state: "持续占用", slots: ["ready", "ready", "ready", "ready"]},
+        dynamic: {ready: 1, creating: 0, waiting: 0, cost: 20, state: "回落到 1", slots: ["ready"]},
+        log: "<strong>缩容：</strong>需求窗口下降后，动态池先回落到 1，保留一个短暂的稳定阶段。"
+      },
+      {
+        time: "T+7 · 再次空闲", arrivals: 0, pulse: 0,
+        fixed: {ready: 4, cold: 1, cost: 32, state: "持续占用", slots: ["ready", "ready", "ready", "ready"]},
+        dynamic: {ready: 0, creating: 0, waiting: 0, cost: 20, state: "空闲归零", slots: []},
+        log: "<strong>一个周期结束：</strong>空闲稳定窗口结束后，动态池从 1 缩到 0，等待下一次需求重新唤醒。"
+      }
+    ];
+
+    const demoElements = {
+      time: document.querySelector("#demoTime"),
+      arrivals: document.querySelector("#demoArrivals"),
+      pulse: document.querySelector("#requestPulse"),
+      fixedSlots: document.querySelector("#fixedSlots"),
+      fixedState: document.querySelector("#fixedState"),
+      fixedReady: document.querySelector("#fixedReady"),
+      fixedCold: document.querySelector("#fixedCold"),
+      fixedCost: document.querySelector("#fixedCost"),
+      dynamicSlots: document.querySelector("#dynamicSlots"),
+      dynamicState: document.querySelector("#dynamicState"),
+      dynamicSupply: document.querySelector("#dynamicSupply"),
+      dynamicWaiting: document.querySelector("#dynamicWaiting"),
+      dynamicCost: document.querySelector("#dynamicCost"),
+      log: document.querySelector("#demoLog"),
+      reset: document.querySelector("#demoReset"),
+      step: document.querySelector("#demoStep"),
+      play: document.querySelector("#demoPlay")
+    };
+
+    let demoIndex = 0;
+    let demoTimer = null;
+
+    function renderSlots(container, slotTypes) {
+      const visibleSlots = [...slotTypes, ...Array(Math.max(0, 6 - slotTypes.length)).fill("")].slice(0, 6);
+      container.innerHTML = visibleSlots.map(type => `<span class="sandbox-slot ${type}" title="${type || "empty"}"></span>`).join("");
+    }
+
+    function renderDemo(index) {
+      const frame = demoFrames[index];
+      demoElements.time.textContent = frame.time;
+      demoElements.arrivals.textContent = frame.arrivals;
+      demoElements.pulse.style.setProperty("--pulse-width", `${frame.pulse}%`);
+      demoElements.fixedState.textContent = frame.fixed.state;
+      demoElements.fixedReady.textContent = frame.fixed.ready;
+      demoElements.fixedCold.textContent = frame.fixed.cold;
+      demoElements.fixedCost.textContent = frame.fixed.cost;
+      demoElements.dynamicState.textContent = frame.dynamic.state;
+      demoElements.dynamicSupply.textContent = `${frame.dynamic.ready} / ${frame.dynamic.creating}`;
+      demoElements.dynamicWaiting.textContent = frame.dynamic.waiting;
+      demoElements.dynamicCost.textContent = frame.dynamic.cost;
+      demoElements.log.innerHTML = `${frame.log} <span>成本单位：warm-slot·tick。</span>`;
+      renderSlots(demoElements.fixedSlots, frame.fixed.slots);
+      renderSlots(demoElements.dynamicSlots, frame.dynamic.slots);
+      demoElements.step.disabled = index === demoFrames.length - 1;
+    }
+
+    function stopDemo() {
+      if (demoTimer !== null) window.clearInterval(demoTimer);
+      demoTimer = null;
+      demoElements.play.textContent = demoIndex === demoFrames.length - 1 ? "重新演示" : "自动演示";
+    }
+
+    function advanceDemo() {
+      if (demoIndex >= demoFrames.length - 1) {
+        stopDemo();
+        return;
+      }
+      demoIndex += 1;
+      renderDemo(demoIndex);
+      if (demoIndex === demoFrames.length - 1) stopDemo();
+    }
+
+    demoElements.step.addEventListener("click", () => {
+      stopDemo();
+      advanceDemo();
+    });
+
+    demoElements.reset.addEventListener("click", () => {
+      stopDemo();
+      demoIndex = 0;
+      renderDemo(demoIndex);
+    });
+
+    demoElements.play.addEventListener("click", () => {
+      if (demoTimer !== null) {
+        stopDemo();
+        return;
+      }
+      if (demoIndex === demoFrames.length - 1) {
+        demoIndex = 0;
+        renderDemo(demoIndex);
+      }
+      demoElements.play.textContent = "暂停";
+      demoTimer = window.setInterval(advanceDemo, 1250);
+    });
+
+    const root = document.documentElement;
+    const themeToggle = document.querySelector("#themeToggle");
+    let savedTheme = null;
+    try {
+      savedTheme = localStorage.getItem("sandbox-pool-intro-theme");
+    } catch (error) {
+      savedTheme = null;
+    }
+    if (savedTheme) root.dataset.theme = savedTheme;
+
+    themeToggle.addEventListener("click", () => {
+      root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+      try {
+        localStorage.setItem("sandbox-pool-intro-theme", root.dataset.theme);
+      } catch (error) {
+        // Local file storage may be unavailable.
+      }
+    });
+
+    renderStep(0);
+    renderDemo(0);
+  </script>
+</body>
+</html>

@@ -91,12 +91,23 @@ def _inventory_figure(simulator: WarmPoolSimulator) -> go.Figure:
         go.Scatter(
             x=frame["time"],
             y=frame["estimated_rate"],
-            name="实际估计速率/s",
+            name="60秒估计速率/s",
             mode="lines",
             line={"dash": "dot"},
         ),
         secondary_y=True,
     )
+    if "planned_rate" in frame:
+        figure.add_trace(
+            go.Scatter(
+                x=frame["time"],
+                y=frame["planned_rate"],
+                name="算法采用速率/s",
+                mode="lines",
+                line={"dash": "dash"},
+            ),
+            secondary_y=True,
+        )
     figure.update_layout(
         title=f"{simulator.policy.name} · 已模拟 {simulator.now:.0f} 秒",
         margin={"l": 40, "r": 40, "t": 55, "b": 35},
@@ -152,6 +163,10 @@ def _dashboard(session: Session) -> tuple[go.Figure, go.Figure, list[list[Any]],
         simulator.config.sla_seconds,
     )
     policy_state = str(getattr(simulator.policy, "state", "NORMAL"))
+    planned_rate = float(
+        getattr(simulator.policy, "planned_rate", simulator._estimated_rate())
+    )
+    queue_boost = int(getattr(simulator.policy, "queue_boost", 0))
     state_labels = {
         "NORMAL": "正常调节",
         "SURGE": "提前扩容",
@@ -162,6 +177,8 @@ def _dashboard(session: Session) -> tuple[go.Figure, go.Figure, list[list[Any]],
         f"### {'正在自动运行' if session.running else '已暂停'}\n"
         f"已模拟 **{simulator.now:.0f}/{simulator.config.duration_seconds} 秒**；"
         f"控制器状态：**{state_labels.get(policy_state, policy_state)}**。\n\n"
+        f"算法采用速率 **{planned_rate:.2f}/s**；当前排队 **{len(simulator.waiting)}** 个，"
+        f"其中计入建议池的排队补偿为 **{queue_boost}** 个。\n\n"
         f"当前输入下，旧公式建议 **{bounds['original_formula']}** 个；"
         f"持续流量要尽量在 SLA 内交付，基础库存至少约 **{bounds['sla_wait']}** 个；"
         f"完全不等待约需 **{bounds['zero_wait']}** 个。"
@@ -186,6 +203,16 @@ def _new_session(
     return (session, *_dashboard(session))
 
 
+def _ensure_session(
+    session: Session | None,
+    policy_label: str,
+    *config_values: Any,
+) -> Session:
+    if session is not None:
+        return session
+    return _new_session(policy_label, False, *config_values)[0]
+
+
 def _start(
     session: Session | None,
     policy_label: str,
@@ -197,7 +224,12 @@ def _start(
     return (session, *_dashboard(session))
 
 
-def _pause(session: Session) -> tuple[Session, go.Figure, go.Figure, list[list[Any]], str, str]:
+def _pause(
+    session: Session | None,
+    policy_label: str,
+    *config_values: Any,
+) -> tuple[Session, go.Figure, go.Figure, list[list[Any]], str, str]:
+    session = _ensure_session(session, policy_label, *config_values)
     session.running = False
     return (session, *_dashboard(session))
 
@@ -226,22 +258,35 @@ def _timer_tick(
 
 
 def _inject_burst(
-    session: Session, rate: float, duration: float
+    session: Session | None,
+    rate: float,
+    duration: float,
+    policy_label: str,
+    *config_values: Any,
 ) -> tuple[Session, go.Figure, go.Figure, list[list[Any]], str, str]:
+    session = _ensure_session(session, policy_label, *config_values)
     session.simulator.inject_burst(rate, duration)
     return (session, *_dashboard(session))
 
 
 def _inject_outage(
-    session: Session, duration: float, multiplier: float
+    session: Session | None,
+    duration: float,
+    multiplier: float,
+    policy_label: str,
+    *config_values: Any,
 ) -> tuple[Session, go.Figure, go.Figure, list[list[Any]], str, str]:
+    session = _ensure_session(session, policy_label, *config_values)
     session.simulator.inject_outage(duration, multiplier)
     return (session, *_dashboard(session))
 
 
 def _recover(
-    session: Session,
+    session: Session | None,
+    policy_label: str,
+    *config_values: Any,
 ) -> tuple[Session, go.Figure, go.Figure, list[list[Any]], str, str]:
+    session = _ensure_session(session, policy_label, *config_values)
     session.simulator.recover_supply()
     return (session, *_dashboard(session))
 
@@ -593,19 +638,25 @@ def build_app() -> gr.Blocks:
             dashboard_outputs,
         )
         start.click(_start, [session, policy, *config_inputs], dashboard_outputs)
-        pause.click(_pause, [session], dashboard_outputs)
+        pause.click(_pause, [session, policy, *config_inputs], dashboard_outputs)
         step.click(_step, [session, policy, *config_inputs], dashboard_outputs)
         inject_burst.click(
             _inject_burst,
-            [session, manual_rate, manual_duration],
+            [session, manual_rate, manual_duration, policy, *config_inputs],
             dashboard_outputs,
         )
         inject_outage.click(
             _inject_outage,
-            [session, manual_outage_duration, manual_outage_multiplier],
+            [
+                session,
+                manual_outage_duration,
+                manual_outage_multiplier,
+                policy,
+                *config_inputs,
+            ],
             dashboard_outputs,
         )
-        recover.click(_recover, [session], dashboard_outputs)
+        recover.click(_recover, [session, policy, *config_inputs], dashboard_outputs)
         timer = gr.Timer(1.0)
         timer.tick(_timer_tick, [session], dashboard_outputs)
 

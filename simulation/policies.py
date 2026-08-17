@@ -22,9 +22,12 @@ class Observation:
     sla_seconds: float
     configured_lead_seconds: float
     forecast_rate: float = 0.0
+    fast_rate: float = 0.0
+    medium_rate: float = 0.0
     available: int = 0
     creating: int = 0
     waiting: int = 0
+    oldest_wait_seconds: float = 0.0
     oldest_creating_age: float = 0.0
     max_unavailable: int = 0
 
@@ -59,7 +62,7 @@ class FixedPolicy:
 
 
 class AdaptiveMedianPolicy:
-    """The policy proposed in ``我的思路.md``.
+    """The original median-based fast-up/slow-down proposal.
 
     ``optimal`` reproduces the original formula:
     ``rate * median_refill / SLA``.  It is deliberately kept as a policy to
@@ -203,7 +206,9 @@ class ProductionPolicy:
     The policy keeps demand intent separate from the applied target, sizes the
     pool from a service quantile over replenishment lead time, predicts known
     near-term traffic, blocks unsafe scale-down, and detects supply capacity
-    that cannot keep up with sustained demand.
+    that cannot keep up with sustained demand. Managed production pools keep at
+    least one warm sandbox because failed stock-out requests are not available
+    as a zero-pool wake-up signal.
     """
 
     name = "新算法：生产级安全库存"
@@ -220,10 +225,10 @@ class ProductionPolicy:
         scale_down_stabilization: float = 120.0,
         capacity_utilization: float = 0.80,
         timeout_multiplier: float = 2.0,
-        min_replicas: int = 0,
+        min_replicas: int = 1,
         max_replicas: int = 10_000,
     ) -> None:
-        self.min_replicas = max(0, int(min_replicas))
+        self.min_replicas = max(1, int(min_replicas))
         self.max_replicas = max(self.min_replicas, int(max_replicas))
         self.target = min(
             self.max_replicas,
@@ -242,6 +247,8 @@ class ProductionPolicy:
         self.timeout_multiplier = max(1.0, timeout_multiplier)
         self.fast_rate = 0.0
         self.slow_rate = 0.0
+        self.planned_rate = 0.0
+        self.queue_boost = 0
         self.recovering_until = 0.0
 
     def observe_refill(self, duration: float) -> None:
@@ -284,14 +291,26 @@ class ProductionPolicy:
             measured,
             self.fast_rate,
             self.slow_rate,
+            max(0.0, observation.fast_rate),
+            max(0.0, observation.medium_rate),
             max(0.0, observation.forecast_rate),
         )
+        self.planned_rate = planned_rate
         lead = self._lead_time(observation.configured_lead_seconds)
         horizon = max(0.0, lead - observation.sla_seconds)
         base_inventory = planned_rate * horizon
         z_score = NormalDist().inv_cdf(self.service_quantile)
         safety_stock = z_score * math.sqrt(max(0.0, planned_rate * lead))
-        raw_intent = math.ceil(base_inventory + safety_stock + self.min_guard)
+        # Every queued request represents one missing ready sandbox. Add that
+        # inventory debt to the steady-state target so a growing queue cannot
+        # remain invisible behind a smoothed demand rate.
+        self.queue_boost = min(
+            self.max_replicas,
+            max(0, int(observation.waiting)),
+        )
+        raw_intent = math.ceil(
+            base_inventory + safety_stock + self.queue_boost + self.min_guard
+        )
         self.intent = min(
             self.max_replicas,
             max(self.min_replicas, raw_intent),
@@ -317,7 +336,11 @@ class ProductionPolicy:
                 self.target = min(self.intent, self.target + step)
             else:
                 self.target = self.intent
-                self.state = "SURGE" if observation.forecast_rate > measured else "NORMAL"
+                self.state = (
+                    "SURGE"
+                    if observation.waiting > 0 or planned_rate > measured
+                    else "NORMAL"
+                )
         elif self.intent < self.target:
             if observation.now < self.recovering_until:
                 self.state = "RECOVERING"
@@ -331,7 +354,7 @@ class ProductionPolicy:
                 self.target = max(stabilized_floor, self.target - reduction)
             self.state = "NORMAL"
         elif self.state != "RECOVERING":
-            self.state = "NORMAL"
+            self.state = "SURGE" if observation.waiting > 0 else "NORMAL"
 
         return min(
             self.max_replicas,

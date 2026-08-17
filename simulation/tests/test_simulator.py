@@ -123,6 +123,22 @@ def test_production_policy_uses_safe_lead_time_inventory() -> None:
     assert policy.intent == target
 
 
+def test_production_policy_never_scales_managed_pool_to_zero() -> None:
+    policy = ProductionPolicy(0, min_replicas=0, min_guard=0)
+    target = policy.desired_replicas(
+        Observation(
+            now=600,
+            current_target=0,
+            estimated_rate=0,
+            sla_seconds=10,
+            configured_lead_seconds=40,
+        )
+    )
+    assert policy.min_replicas == 1
+    assert policy.intent == 1
+    assert target == 1
+
+
 def test_production_policy_capacity_gate_preserves_intent() -> None:
     policy = ProductionPolicy(20)
     target = policy.desired_replicas(
@@ -138,6 +154,40 @@ def test_production_policy_capacity_gate_preserves_intent() -> None:
     assert policy.breaker_open
     assert policy.intent > target
     assert target == 20
+
+
+def test_production_policy_uses_fast_rate_and_queue_debt() -> None:
+    baseline = ProductionPolicy(20, max_replicas=2000)
+    baseline.desired_replicas(
+        Observation(
+            now=10,
+            current_target=20,
+            estimated_rate=2,
+            sla_seconds=10,
+            configured_lead_seconds=40,
+        )
+    )
+
+    policy = ProductionPolicy(20, max_replicas=2000)
+    target = policy.desired_replicas(
+        Observation(
+            now=10,
+            current_target=20,
+            estimated_rate=2,
+            fast_rate=12,
+            medium_rate=8,
+            waiting=75,
+            oldest_wait_seconds=5,
+            sla_seconds=10,
+            configured_lead_seconds=40,
+        )
+    )
+
+    assert policy.planned_rate == 12
+    assert policy.queue_boost == 75
+    assert policy.intent >= baseline.intent + 75
+    assert target == policy.intent
+    assert policy.state == "SURGE"
 
 
 def test_production_policy_prewarms_before_scheduled_burst() -> None:

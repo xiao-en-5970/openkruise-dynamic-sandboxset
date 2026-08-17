@@ -6,3 +6,5 @@ controller/sandbox-pool-controller
 .DS_Store
 .coverage
 htmlcov/
+/我的思路.md
+/docs/我的思路.md

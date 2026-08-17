@@ -290,17 +290,28 @@ class WarmPoolSimulator:
             self.waiting.append(self.now)
         self.arrival_history.append((self.now, count))
 
-    def _estimated_rate(self) -> float:
-        cutoff = self.now - self.config.rate_window
+    def _estimated_rate(self, window_seconds: float | None = None) -> float:
+        configured_window = self.config.rate_window
+        cutoff = self.now - configured_window
         while self.arrival_history and self.arrival_history[0][0] < cutoff:
             self.arrival_history.popleft()
-        if not self.arrival_history:
+        window = min(
+            configured_window,
+            max(self.config.step_seconds, window_seconds or configured_window),
+        )
+        window_start = self.now - window
+        samples = [
+            (at, count)
+            for at, count in self.arrival_history
+            if at >= window_start
+        ]
+        if not samples:
             return 0.0
         elapsed = min(
-            self.config.rate_window,
-            max(self.config.step_seconds, self.now - self.arrival_history[0][0] + self.config.step_seconds),
+            window,
+            max(self.config.step_seconds, self.now - samples[0][0] + self.config.step_seconds),
         )
-        return sum(count for _, count in self.arrival_history) / elapsed
+        return sum(count for _, count in samples) / elapsed
 
     def _control(self) -> None:
         if self.now - self.last_control + 1e-9 < self.config.control_interval:
@@ -310,19 +321,28 @@ class WarmPoolSimulator:
             (self.now - task.started_at for task in self.refills),
             default=0.0,
         )
+        oldest_wait_seconds = (
+            max(0.0, self.now - self.waiting[0]) if self.waiting else 0.0
+        )
+        fast_rate = self._estimated_rate(min(5.0, self.config.rate_window))
+        medium_rate = self._estimated_rate(min(15.0, self.config.rate_window))
+        slow_rate = self._estimated_rate(self.config.rate_window)
         desired = self.policy.desired_replicas(
             Observation(
                 now=self.now,
                 current_target=self.target_replicas,
-                estimated_rate=self._estimated_rate(),
+                estimated_rate=slow_rate,
                 sla_seconds=self.config.sla_seconds,
                 configured_lead_seconds=self.config.refill_median_seconds,
                 forecast_rate=self._forecast_rate(
                     self.config.refill_median_seconds
                 ),
+                fast_rate=fast_rate,
+                medium_rate=medium_rate,
                 available=self.available,
                 creating=self.creating,
                 waiting=len(self.waiting),
+                oldest_wait_seconds=oldest_wait_seconds,
                 oldest_creating_age=oldest_creating_age,
                 max_unavailable=self.config.max_unavailable,
             )
@@ -369,6 +389,7 @@ class WarmPoolSimulator:
             )
 
     def _record(self) -> None:
+        slow_rate = self._estimated_rate(self.config.rate_window)
         self.timeline.append(
             {
                 "time": self.now,
@@ -377,7 +398,12 @@ class WarmPoolSimulator:
                 "waiting": len(self.waiting),
                 "target": self.target_replicas,
                 "requests": self.requests,
-                "estimated_rate": self._estimated_rate(),
+                "estimated_rate": slow_rate,
+                "fast_rate": self._estimated_rate(min(5.0, self.config.rate_window)),
+                "medium_rate": self._estimated_rate(min(15.0, self.config.rate_window)),
+                "planned_rate": float(
+                    getattr(self.policy, "planned_rate", slow_rate)
+                ),
                 "forecast_rate": self._forecast_rate(
                     self.config.refill_median_seconds
                 ),
@@ -385,6 +411,7 @@ class WarmPoolSimulator:
                 "policy_intent": int(
                     getattr(self.policy, "intent", self.target_replicas)
                 ),
+                "queue_boost": int(getattr(self.policy, "queue_boost", 0)),
                 "policy_state": str(getattr(self.policy, "state", "NORMAL")),
                 "warm_cost": self.warm_sandbox_seconds,
             }

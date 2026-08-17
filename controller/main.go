@@ -43,7 +43,13 @@ const (
 	refillSecondsKey       = "pool-autoscaling.bohr.io/refill-seconds"
 	serviceQuantileKey     = "pool-autoscaling.bohr.io/service-quantile"
 	rateWindowSecondsKey   = "pool-autoscaling.bohr.io/rate-window-seconds"
-	idleToZeroSecondsKey   = "pool-autoscaling.bohr.io/idle-to-zero-seconds"
+	fastRateWindowKey      = "pool-autoscaling.bohr.io/fast-rate-window-seconds"
+	mediumRateWindowKey    = "pool-autoscaling.bohr.io/medium-rate-window-seconds"
+	pendingDemandKey       = "pool-autoscaling.bohr.io/pending-demand"
+	pendingDemandTimeKey   = "pool-autoscaling.bohr.io/pending-demand-updated-at"
+	pendingDemandMaxAgeKey = "pool-autoscaling.bohr.io/pending-demand-max-age-seconds"
+	idleToMinSecondsKey    = "pool-autoscaling.bohr.io/idle-to-min-seconds"
+	legacyIdleToZeroKey    = "pool-autoscaling.bohr.io/idle-to-zero-seconds"
 	safetyGuardKey         = "pool-autoscaling.bohr.io/safety-guard"
 	refillQuantileKey      = "pool-autoscaling.bohr.io/refill-quantile"
 	minLeadSamplesKey      = "pool-autoscaling.bohr.io/min-lead-samples"
@@ -56,27 +62,37 @@ const (
 	refillSourceKey        = "pool-autoscaling.bohr.io/refill-source"
 	refillSamplesKey       = "pool-autoscaling.bohr.io/refill-samples"
 	demandRateKey          = "pool-autoscaling.bohr.io/demand-rate"
-	demandTotalKey         = "pool-autoscaling.bohr.io/demand-total"
-	lastDemandTimeKey      = "pool-autoscaling.bohr.io/last-demand-time"
+	demandRateFastKey      = "pool-autoscaling.bohr.io/demand-rate-fast"
+	demandRateMediumKey    = "pool-autoscaling.bohr.io/demand-rate-medium"
+	demandRateSlowKey      = "pool-autoscaling.bohr.io/demand-rate-slow"
+	pendingObservedKey     = "pool-autoscaling.bohr.io/pending-demand-observed"
+	queueBoostKey          = "pool-autoscaling.bohr.io/queue-boost"
 	supplyCapacityKey      = "pool-autoscaling.bohr.io/supply-capacity-rate"
 	intentKey              = "pool-autoscaling.bohr.io/target-intent"
 	appliedKey             = "pool-autoscaling.bohr.io/target-applied"
 	legacyEnabledKey       = "dynamic-pool"
 	legacyMinReplicasKey   = "min-scale"
 	legacyMaxReplicasKey   = "max-scale"
-	defaultMinReplicas     = 0
+	defaultMinReplicas     = 1
 	defaultMaxReplicas     = 100
 	defaultSLASeconds      = 10.0
 	defaultRefillSeconds   = 40.0
 	defaultServiceQuantile = 0.99
 	defaultRateWindow      = 60.0
-	defaultIdleToZero      = 600.0
+	defaultFastRateWindow  = 5.0
+	defaultMediumWindow    = 15.0
+	defaultPendingMaxAge   = 30.0
+	defaultIdleToMin       = 600.0
 	defaultSafetyGuard     = 2
 	defaultRefillQuantile  = 0.95
 	defaultMinLeadSamples  = 5
 	defaultLeadSampleLimit = 128
 	defaultCapacityUsage   = 0.8
 	defaultTimeoutMultiple = 3.0
+	sandboxPoolLabel       = "agents.kruise.io/sandbox-pool"
+	sandboxClaimedLabel    = "agents.kruise.io/sandbox-claimed"
+	sandboxClaimNameLabel  = "agents.kruise.io/claim-name"
+	sandboxClaimTimeKey    = "agents.kruise.io/claim-timestamp"
 )
 
 type demandEvent struct {
@@ -91,7 +107,10 @@ type poolConfig struct {
 	refillSeconds     float64
 	serviceQuantile   float64
 	rateWindowSeconds float64
-	idleToZeroSeconds float64
+	fastRateWindow    float64
+	mediumRateWindow  float64
+	pendingMaxAge     float64
+	idleToMinSeconds  float64
 	safetyGuard       int
 	refillQuantile    float64
 	minLeadSamples    int
@@ -205,6 +224,7 @@ func (c *controller) reconcile(ctx context.Context) error {
 	}
 
 	events := make(map[string][]demandEvent)
+	pendingByPool := make(map[string]int)
 	for index := range claims.Items {
 		claim := &claims.Items[index]
 		templateName, found, _ := unstructured.NestedString(claim.Object, "spec", "templateName")
@@ -220,16 +240,24 @@ func (c *controller) reconcile(ctx context.Context) error {
 		events[key] = append(events[key], demandEvent{
 			at: claim.GetCreationTimestamp().Time, replicas: replicas,
 		})
+		pendingByPool[key] += claimPendingReplicas(claim, replicas)
 	}
 	supply := make(map[string][]supplyObservation)
 	for index := range sandboxes.Items {
 		sandbox := &sandboxes.Items[index]
-		poolName := sandbox.GetLabels()["agents.kruise.io/sandbox-pool"]
+		labels := sandbox.GetLabels()
+		poolName := labels[sandboxPoolLabel]
 		if poolName == "" {
 			continue
 		}
-		ready, readyAt := sandboxReady(sandbox)
 		key := sandbox.GetNamespace() + "/" + poolName
+		if event, found := e2bDemandFromSandbox(sandbox); found {
+			events[key] = append(events[key], event)
+		}
+		if labels[sandboxClaimedLabel] == "true" {
+			continue
+		}
+		ready, readyAt := sandboxReady(sandbox)
 		supply[key] = append(supply[key], supplyObservation{
 			uid:       string(sandbox.GetUID()),
 			createdAt: sandbox.GetCreationTimestamp().Time,
@@ -249,7 +277,9 @@ func (c *controller) reconcile(ctx context.Context) error {
 		poolID := persistentPoolID(set)
 		activePools[poolID] = struct{}{}
 		key := set.GetNamespace() + "/" + set.GetName()
-		if err := c.reconcilePool(ctx, set, events[key], supply[key], now); err != nil {
+		if err := c.reconcilePool(
+			ctx, set, events[key], supply[key], pendingByPool[key], now,
+		); err != nil {
 			failures = append(failures, set.GetNamespace()+"/"+set.GetName()+": "+err.Error())
 		}
 	}
@@ -269,6 +299,7 @@ func (c *controller) reconcilePool(
 	set *unstructured.Unstructured,
 	events []demandEvent,
 	supply []supplyObservation,
+	claimPending int,
 	now time.Time,
 ) error {
 	annotations := set.GetAnnotations()
@@ -305,49 +336,48 @@ func (c *controller) reconcilePool(
 	}
 
 	latestDemand := set.GetCreationTimestamp().Time
-	windowStart := now.Add(-time.Duration(config.rateWindowSeconds * float64(time.Second)))
-	demandTotal, directDemandAt, err := directDemandFromAnnotations(annotations)
-	if err != nil {
-		return err
-	}
-	recentReplicas, persistedDemandAt := c.state.observeDemand(
-		poolID, demandTotal, directDemandAt, windowStart,
-	)
-	if persistedDemandAt.After(latestDemand) {
-		latestDemand = persistedDemandAt
-	}
 	for _, event := range events {
 		if event.at.After(latestDemand) {
 			latestDemand = event.at
 		}
-		if !event.at.Before(windowStart) {
-			recentReplicas += event.replicas
-		}
 	}
-
-	rate := float64(recentReplicas) / config.rateWindowSeconds
+	externalPending, pendingUpdatedAt := pendingDemandFromAnnotations(
+		annotations, now, config.pendingMaxAge,
+	)
+	if pendingUpdatedAt.After(latestDemand) {
+		latestDemand = pendingUpdatedAt
+	}
+	pending := min(
+		config.maxReplicas,
+		min(max(0, claimPending), config.maxReplicas)+
+			min(externalPending, config.maxReplicas),
+	)
+	queueBoost := pending
+	fastRate := demandRate(events, now, config.fastRateWindow)
+	mediumRate := demandRate(events, now, config.mediumRateWindow)
+	slowRate := demandRate(events, now, config.rateWindowSeconds)
+	rate := max(fastRate, mediumRate, slowRate)
+	recentReplicas := demandCount(events, now, config.rateWindowSeconds)
 	rawTarget := calculateTarget(
 		rate,
 		refillSeconds,
 		config.slaSeconds,
 		config.serviceQuantile,
 		config.safetyGuard,
-	)
+	) + queueBoost
 	intent := clamp(rawTarget, config.minReplicas, config.maxReplicas)
-	if recentReplicas > 0 && current == 0 && config.maxReplicas > 0 {
-		intent = max(intent, 1)
-	}
 	state := "NORMAL"
 
 	idleFor := now.Sub(latestDemand).Seconds()
-	if recentReplicas == 0 {
-		if idleFor >= config.idleToZeroSeconds {
+	hasDemand := recentReplicas > 0 || pending > 0
+	if !hasDemand {
+		if current < config.minReplicas || idleFor >= config.idleToMinSeconds {
 			intent = config.minReplicas
 		} else {
 			intent = current
 			state = "RECOVERING"
 		}
-	} else if intent > current {
+	} else if pending > 0 || intent > current || fastRate > slowRate {
 		state = "SURGE"
 	}
 
@@ -362,25 +392,36 @@ func (c *controller) reconcilePool(
 	}
 
 	decision := fmt.Sprintf(
-		"state=%s rate=%.3f/s lead=%.1fs intent=%d applied=%d creating=%d/%d",
-		state, rate, refillSeconds, intent, applied, creating, maxUnavailable,
+		"state=%s rate=%.3f/s fast=%.3f medium=%.3f slow=%.3f pending=%d lead=%.1fs intent=%d applied=%d creating=%d/%d",
+		state, rate, fastRate, mediumRate, slowRate, pending,
+		refillSeconds, intent, applied, creating, maxUnavailable,
 	)
 	annotationUpdates := map[string]string{
-		lastDecisionKey:    decision,
-		controllerStateKey: state,
-		learnedRefillKey:   fmt.Sprintf("%.3f", refillSeconds),
-		refillSourceKey:    map[bool]string{true: "learned", false: "fallback"}[learned],
-		refillSamplesKey:   strconv.Itoa(sampleCount),
-		demandRateKey:      fmt.Sprintf("%.6f", rate),
-		supplyCapacityKey:  fmt.Sprintf("%.6f", supplyCapacityRate),
-		intentKey:          strconv.Itoa(intent),
-		appliedKey:         strconv.Itoa(applied),
+		lastDecisionKey:     decision,
+		controllerStateKey:  state,
+		learnedRefillKey:    fmt.Sprintf("%.3f", refillSeconds),
+		refillSourceKey:     map[bool]string{true: "learned", false: "fallback"}[learned],
+		refillSamplesKey:    strconv.Itoa(sampleCount),
+		demandRateKey:       fmt.Sprintf("%.6f", rate),
+		demandRateFastKey:   fmt.Sprintf("%.6f", fastRate),
+		demandRateMediumKey: fmt.Sprintf("%.6f", mediumRate),
+		demandRateSlowKey:   fmt.Sprintf("%.6f", slowRate),
+		pendingObservedKey:  strconv.Itoa(pending),
+		queueBoostKey:       strconv.Itoa(queueBoost),
+		supplyCapacityKey:   fmt.Sprintf("%.6f", supplyCapacityRate),
+		intentKey:           strconv.Itoa(intent),
+		appliedKey:          strconv.Itoa(applied),
 	}
 	c.metrics.setPool(poolID, poolMetrics{
 		namespace:          set.GetNamespace(),
 		name:               set.GetName(),
 		state:              state,
 		demandRate:         rate,
+		fastRate:           fastRate,
+		mediumRate:         mediumRate,
+		slowRate:           slowRate,
+		pendingDemand:      pending,
+		queueBoost:         queueBoost,
 		refillP95Seconds:   refillSeconds,
 		refillLearned:      learned,
 		refillSamples:      sampleCount,
@@ -434,31 +475,92 @@ func dynamicPoolEnabled(annotations map[string]string) bool {
 	return parseBool(firstNonEmpty(annotations[enabledKey], annotations[legacyEnabledKey]), false)
 }
 
-func directDemandFromAnnotations(annotations map[string]string) (uint64, time.Time, error) {
-	rawTotal := strings.TrimSpace(annotations[demandTotalKey])
-	if rawTotal == "" {
-		return 0, time.Time{}, nil
+func claimPendingReplicas(claim *unstructured.Unstructured, requested int) int {
+	phase, _, _ := unstructured.NestedString(claim.Object, "status", "phase")
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "completed", "failed":
+		return 0
 	}
-	total, err := strconv.ParseUint(rawTotal, 10, 64)
+	completionTime, _, _ := unstructured.NestedString(claim.Object, "status", "completionTime")
+	if strings.TrimSpace(completionTime) != "" {
+		return 0
+	}
+	claimed64, _, _ := unstructured.NestedInt64(claim.Object, "status", "claimedReplicas")
+	return max(0, requested-int(claimed64))
+}
+
+func pendingDemandFromAnnotations(
+	annotations map[string]string,
+	now time.Time,
+	maxAgeSeconds float64,
+) (int, time.Time) {
+	rawPending := strings.TrimSpace(annotations[pendingDemandKey])
+	if rawPending == "" {
+		return 0, time.Time{}
+	}
+	pending, err := strconv.Atoi(rawPending)
+	if err != nil || pending < 0 {
+		return 0, time.Time{}
+	}
+	rawTime := strings.TrimSpace(annotations[pendingDemandTimeKey])
+	if rawTime == "" {
+		return 0, time.Time{}
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, rawTime)
 	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("parse %s: %w", demandTotalKey, err)
+		return 0, time.Time{}
 	}
-	if total == 0 {
-		return 0, time.Time{}, nil
+	age := now.Sub(updatedAt).Seconds()
+	if age < -5 || age > maxAgeSeconds {
+		return 0, time.Time{}
 	}
-	rawTime := strings.TrimSpace(annotations[lastDemandTimeKey])
-	at, err := time.Parse(time.RFC3339Nano, rawTime)
-	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("parse %s: %w", lastDemandTimeKey, err)
+	return pending, updatedAt
+}
+
+func demandCount(events []demandEvent, now time.Time, windowSeconds float64) int {
+	if windowSeconds <= 0 {
+		return 0
 	}
-	return total, at, nil
+	windowStart := now.Add(-time.Duration(windowSeconds * float64(time.Second)))
+	total := 0
+	for _, event := range events {
+		if event.at.After(now) || event.at.Before(windowStart) {
+			continue
+		}
+		total += max(0, event.replicas)
+	}
+	return total
+}
+
+func demandRate(events []demandEvent, now time.Time, windowSeconds float64) float64 {
+	if windowSeconds <= 0 {
+		return 0
+	}
+	windowStart := now.Add(-time.Duration(windowSeconds * float64(time.Second)))
+	window := 0.0
+	count := 0
+	found := false
+	for _, event := range events {
+		if event.at.After(now) || event.at.Before(windowStart) {
+			continue
+		}
+		effectiveReplicas := max(0, event.replicas)
+		count += effectiveReplicas
+		window = max(window, now.Sub(event.at).Seconds())
+		found = found || effectiveReplicas > 0
+	}
+	if !found || count == 0 {
+		return 0
+	}
+	elapsed := max(1.0, window)
+	return float64(count) / elapsed
 }
 
 func configFromAnnotations(annotations map[string]string) poolConfig {
-	minReplicas := parseInt(
+	minReplicas := max(0, parseInt(
 		firstNonEmpty(annotations[minReplicasKey], annotations[legacyMinReplicasKey]),
 		defaultMinReplicas,
-	)
+	))
 	maxReplicas := parseInt(
 		firstNonEmpty(annotations[maxReplicasKey], annotations[legacyMaxReplicasKey]),
 		defaultMaxReplicas,
@@ -466,14 +568,29 @@ func configFromAnnotations(annotations map[string]string) poolConfig {
 	if maxReplicas < minReplicas {
 		maxReplicas = minReplicas
 	}
+	slowWindow := positiveFloat(annotations[rateWindowSecondsKey], defaultRateWindow)
+	fastWindow := min(
+		positiveFloat(annotations[fastRateWindowKey], defaultFastRateWindow),
+		slowWindow,
+	)
+	mediumWindow := min(
+		max(fastWindow, positiveFloat(annotations[mediumRateWindowKey], defaultMediumWindow)),
+		slowWindow,
+	)
 	return poolConfig{
-		minReplicas:       max(0, minReplicas),
+		minReplicas:       minReplicas,
 		maxReplicas:       max(0, maxReplicas),
 		slaSeconds:        positiveFloat(annotations[slaSecondsKey], defaultSLASeconds),
 		refillSeconds:     positiveFloat(annotations[refillSecondsKey], defaultRefillSeconds),
 		serviceQuantile:   boundedFloat(annotations[serviceQuantileKey], defaultServiceQuantile, 0.5001, 0.9999),
-		rateWindowSeconds: positiveFloat(annotations[rateWindowSecondsKey], defaultRateWindow),
-		idleToZeroSeconds: positiveFloat(annotations[idleToZeroSecondsKey], defaultIdleToZero),
+		rateWindowSeconds: slowWindow,
+		fastRateWindow:    fastWindow,
+		mediumRateWindow:  mediumWindow,
+		pendingMaxAge:     positiveFloat(annotations[pendingDemandMaxAgeKey], defaultPendingMaxAge),
+		idleToMinSeconds: positiveFloat(
+			firstNonEmpty(annotations[idleToMinSecondsKey], annotations[legacyIdleToZeroKey]),
+			defaultIdleToMin,
+		),
 		safetyGuard:       max(0, parseInt(annotations[safetyGuardKey], defaultSafetyGuard)),
 		refillQuantile:    boundedFloat(annotations[refillQuantileKey], defaultRefillQuantile, 0.5001, 1.0),
 		minLeadSamples:    max(1, parseInt(annotations[minLeadSamplesKey], defaultMinLeadSamples)),
@@ -481,6 +598,25 @@ func configFromAnnotations(annotations map[string]string) poolConfig {
 		capacityUsage:     boundedFloat(annotations[capacityUtilizationKey], defaultCapacityUsage, 0.05, 1.0),
 		timeoutMultiplier: positiveFloat(annotations[timeoutMultiplierKey], defaultTimeoutMultiple),
 	}
+}
+
+// e2bDemandFromSandbox observes successful sandbox-manager claims through
+// official Sandbox metadata. SandboxClaim-owned sandboxes are excluded because
+// their demand is already counted from the SandboxClaim object itself.
+func e2bDemandFromSandbox(sandbox *unstructured.Unstructured) (demandEvent, bool) {
+	labels := sandbox.GetLabels()
+	if labels[sandboxClaimedLabel] != "true" || labels[sandboxClaimNameLabel] != "" {
+		return demandEvent{}, false
+	}
+	rawTime := strings.TrimSpace(sandbox.GetAnnotations()[sandboxClaimTimeKey])
+	if rawTime == "" {
+		return demandEvent{}, false
+	}
+	claimedAt, err := time.Parse(time.RFC3339Nano, rawTime)
+	if err != nil {
+		return demandEvent{}, false
+	}
+	return demandEvent{at: claimedAt, replicas: 1}, true
 }
 
 func persistentPoolID(set *unstructured.Unstructured) string {

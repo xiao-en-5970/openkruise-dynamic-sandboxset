@@ -17,6 +17,11 @@ type poolMetrics struct {
 	name               string
 	state              string
 	demandRate         float64
+	fastRate           float64
+	mediumRate         float64
+	slowRate           float64
+	pendingDemand      int
+	queueBoost         int
 	refillP95Seconds   float64
 	refillLearned      bool
 	refillSamples      int
@@ -99,7 +104,12 @@ func (m *metricsRegistry) ServeHTTP(writer http.ResponseWriter, _ *http.Request)
 		name        string
 		description string
 	}{
-		{"sandbox_pool_demand_rate", "Observed SandboxClaim and direct claim demand per second."},
+		{"sandbox_pool_demand_rate", "Planned demand rate, the maximum of fast, medium, and slow windows."},
+		{"sandbox_pool_demand_rate_fast", "Observed demand per second in the fast window."},
+		{"sandbox_pool_demand_rate_medium", "Observed demand per second in the medium window."},
+		{"sandbox_pool_demand_rate_slow", "Observed demand per second in the slow window."},
+		{"sandbox_pool_pending_demand", "Current unfulfilled SandboxClaim and fresh external demand."},
+		{"sandbox_pool_queue_boost", "Pending demand added directly to target intent."},
 		{"sandbox_pool_refill_p95_seconds", "Effective creation-to-Ready quantile or configured fallback in seconds."},
 		{"sandbox_pool_refill_learned", "Whether the effective refill lead time comes from learned samples."},
 		{"sandbox_pool_refill_samples", "Number of persisted refill lead-time samples."},
@@ -139,6 +149,16 @@ func metricValue(name string, pool poolMetrics) string {
 	switch name {
 	case "sandbox_pool_demand_rate":
 		return formatFloat(pool.demandRate)
+	case "sandbox_pool_demand_rate_fast":
+		return formatFloat(pool.fastRate)
+	case "sandbox_pool_demand_rate_medium":
+		return formatFloat(pool.mediumRate)
+	case "sandbox_pool_demand_rate_slow":
+		return formatFloat(pool.slowRate)
+	case "sandbox_pool_pending_demand":
+		return strconv.Itoa(pool.pendingDemand)
+	case "sandbox_pool_queue_boost":
+		return strconv.Itoa(pool.queueBoost)
 	case "sandbox_pool_refill_p95_seconds":
 		return formatFloat(pool.refillP95Seconds)
 	case "sandbox_pool_refill_learned":
