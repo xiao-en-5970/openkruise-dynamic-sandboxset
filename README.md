@@ -1,3 +1,9 @@
+> **已迁移（2026-10-16）**：本项目已全量迁入
+> [`bohrsandbox-openkruise-extension`](../dp/main/bohrsandbox-openkruise-extension)
+> 的 [`components/dynamic-pool`](../dp/main/bohrsandbox-openkruise-extension/components/dynamic-pool)，
+> 作为其第五个组件（Helm Chart 统一管理）。本仓库停止演进，仅保留历史；
+> 后续开发、部署与文档以扩展仓为准。
+
 # OpenKruise SandboxSet 外置动态预热池
 
 项目包含两个相互独立、使用同一算法模型的部分：
