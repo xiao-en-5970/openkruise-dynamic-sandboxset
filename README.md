@@ -89,35 +89,33 @@ metadata:
 - SandboxClaim：`spec.createOnNoStock: false`；
 - E2B create metadata：`e2b.agents.kruise.io/create-on-no-stock: "false"`。
 
-还可以配置：
+还可以配置（这是全部可调参数）：
 
 ```yaml
 pool-autoscaling.bohr.io/sla-seconds: "10"
 pool-autoscaling.bohr.io/refill-seconds: "40"
-pool-autoscaling.bohr.io/service-quantile: "0.99"
-pool-autoscaling.bohr.io/fast-rate-window-seconds: "5"
-pool-autoscaling.bohr.io/medium-rate-window-seconds: "15"
-pool-autoscaling.bohr.io/rate-window-seconds: "60"
-pool-autoscaling.bohr.io/pending-demand-max-age-seconds: "30"
+pool-autoscaling.bohr.io/overflow-budget: "0.05"
 pool-autoscaling.bohr.io/queue-boost-factor: "0.5"
 pool-autoscaling.bohr.io/queue-boost-max: "10"
 pool-autoscaling.bohr.io/max-scale-up-step: "4"
 pool-autoscaling.bohr.io/idle-to-min-seconds: "120"
 pool-autoscaling.bohr.io/scale-down-stabilization-seconds: "180"
 pool-autoscaling.bohr.io/scale-down-fraction: "0.05"
-pool-autoscaling.bohr.io/safety-guard: "2"
-pool-autoscaling.bohr.io/refill-quantile: "0.95"
-pool-autoscaling.bohr.io/min-lead-samples: "5"
-pool-autoscaling.bohr.io/lead-sample-limit: "128"
-pool-autoscaling.bohr.io/capacity-utilization: "0.8"
-pool-autoscaling.bohr.io/supply-timeout-multiplier: "3"
-pool-autoscaling.bohr.io/overflow-budget: "0.05"
-pool-autoscaling.bohr.io/overflow-window-seconds: "900"
-pool-autoscaling.bohr.io/min-overflow-samples: "20"
-pool-autoscaling.bohr.io/drain-boost-max: "3"
 ```
 
-为平滑迁移，旧的 `pool-autoscaling.bohr.io/idle-to-zero-seconds` 仍作为
+两个高级逃生舱只在供给故障排查时调整，平时保持默认：
+
+```yaml
+pool-autoscaling.bohr.io/capacity-utilization: "0.8"
+pool-autoscaling.bohr.io/supply-timeout-multiplier: "3"
+```
+
+其余机制全部是内部固化常量，不再暴露注解（设置会被忽略）：
+速率窗口 5/15/60s、历史底线窗 1h、保底库存 2、补货学习分位数 0.95、
+学习样本门槛/上限 5/128、溢出统计窗 900s、闭环最小样本 20、排空加速 3×
+（封顶 30%/轮）、外部排队信号时效 30s；`overflow-budget: "0"` 时回退固定
+P99 口径（z=2.33）。为平滑迁移，旧的
+`pool-autoscaling.bohr.io/idle-to-zero-seconds` 仍作为
 `idle-to-min-seconds` 的兼容别名读取。
 连续无需求且无排队达到 `idle-to-min-seconds` 后，Controller 会跳过慢速窗口和逐步缩容，
 直接把目标池降到流量底线 `max(min-scale, 近 1 小时请求折算出的 raw floor)`；
@@ -142,7 +140,7 @@ pool-autoscaling.bohr.io/pending-demand: "12"
 pool-autoscaling.bohr.io/pending-demand-updated-at: "2026-08-17T07:20:00Z"
 ```
 
-时间戳超过 `pending-demand-max-age-seconds` 后信号自动失效，避免过期队列永久撑大
+时间戳超过固定时效 30 秒后信号自动失效，避免过期队列永久撑大
 库存。只要 pending demand 大于 0，算法立即进入 `SURGE`。队列补偿按照
 `ceil(pending × queue-boost-factor)` 计算，并受 `queue-boost-max` 限制，避免同一
 突发同时被短窗口速率和完整队列重复放大。`createOnNoStock=true` 的 Claim 已由官方
@@ -159,9 +157,7 @@ metadata:
     min-scale: "1"
     max-scale: "500"
     pool-autoscaling.bohr.io/sla-seconds: "30"
-    pool-autoscaling.bohr.io/service-quantile: "0.95"
-    pool-autoscaling.bohr.io/fast-rate-window-seconds: "5"
-    pool-autoscaling.bohr.io/medium-rate-window-seconds: "30"
+    pool-autoscaling.bohr.io/overflow-budget: "0.05"
     pool-autoscaling.bohr.io/queue-boost-factor: "0.5"
     pool-autoscaling.bohr.io/queue-boost-max: "10"
     pool-autoscaling.bohr.io/max-scale-up-step: "4"
@@ -169,6 +165,8 @@ spec:
   scaleStrategy:
     maxUnavailable: 10
 ```
+
+其中 `overflow-budget: "0.05"` 等价于旧建议里的 `service-quantile: "0.95"`。
 
 `max-scale-up-step` 限制每轮写入的目标增量；`maxUnavailable` 是 OpenKruise
 SandboxSet 的实际并发补货闸门。两者分别约束控制面跳变和供给侧并发。
@@ -201,17 +199,17 @@ SandboxSet 的实际并发补货闸门。两者分别约束控制面跳变和供
   `agents.kruise.io/sandbox-priority: "100"`（`newSandboxFromSandboxSet`），
   池内补货成员不带该注解。Controller 据此把已领取 Sandbox 精确分类为
   冷启动或暖池命中，并按分钟桶持久化统计。该分类依赖此上游不变量。
-- **溢出预算**（`overflow-budget`，默认 `0.05`，`0` 表示回退旧
-  `service-quantile` 口径）：安全库存的 z 值改为
+- **溢出预算**（`overflow-budget`，默认 `0.05`，`0` 表示回退固定
+  P99 口径 z=2.33）：安全库存的 z 值改为
   `Φ⁻¹(1 − ε)`，即按「允许 ε 比例请求走冷启动」定池，而不是按延迟分位。
   ε=0.01 时 z≈2.33（与 P99 一致），ε=0.05 时 z≈1.64，ε=0.10 时 z≈1.28。
 - **闭环校准**：每个缩容稳定窗评估一次窗口内实测溢出率 `r̂`
-  （窗口 `overflow-window-seconds`，至少 `min-overflow-samples` 个样本）：
+  （固定 900 秒窗口，至少 20 个样本）：
   `r̂ > 2ε` 时 z 上调 0.15，`r̂ = 0` 时下调 0.05，`r̂ < ε/2` 时下调 0.10；
   有效 z 被限制在 `[0.84, 3.09]`。调整量持久化在状态 ConfigMap 中，
   重启或 leader 切换不重学。
 - **排空加速**：窗口内溢出率为 0（样本充足）且无 pending 且非 SURGE 时，
-  缩容步幅放大为 `scale-down-fraction × drain-boost-max`（封顶 30%/轮），
+  缩容步幅固定放大 3 倍（封顶 30%/轮），
   因为此时库存已被验证充足，多余部分属于纯站岗成本；1 小时流量底线
   仍然保护潮汐型周期需求。
 - **补货学习防污染**：每个补货样本记录采集时刻的在途冷创建数，

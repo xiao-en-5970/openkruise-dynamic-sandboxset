@@ -36,36 +36,25 @@ var (
 )
 
 const (
-	enabledKey                    = "pool-autoscaling.bohr.io/enabled"
-	minReplicasKey                = "pool-autoscaling.bohr.io/min-replicas"
-	maxReplicasKey                = "pool-autoscaling.bohr.io/max-replicas"
-	slaSecondsKey                 = "pool-autoscaling.bohr.io/sla-seconds"
-	refillSecondsKey              = "pool-autoscaling.bohr.io/refill-seconds"
-	serviceQuantileKey            = "pool-autoscaling.bohr.io/service-quantile"
-	rateWindowSecondsKey          = "pool-autoscaling.bohr.io/rate-window-seconds"
-	fastRateWindowKey             = "pool-autoscaling.bohr.io/fast-rate-window-seconds"
-	mediumRateWindowKey           = "pool-autoscaling.bohr.io/medium-rate-window-seconds"
-	pendingDemandKey              = "pool-autoscaling.bohr.io/pending-demand"
-	pendingDemandTimeKey          = "pool-autoscaling.bohr.io/pending-demand-updated-at"
-	pendingDemandMaxAgeKey        = "pool-autoscaling.bohr.io/pending-demand-max-age-seconds"
-	queueBoostFactorKey           = "pool-autoscaling.bohr.io/queue-boost-factor"
-	queueBoostMaxKey              = "pool-autoscaling.bohr.io/queue-boost-max"
-	maxScaleUpStepKey             = "pool-autoscaling.bohr.io/max-scale-up-step"
-	idleToMinSecondsKey           = "pool-autoscaling.bohr.io/idle-to-min-seconds"
-	scaleDownStabilizationKey     = "pool-autoscaling.bohr.io/scale-down-stabilization-seconds"
-	scaleDownFractionKey          = "pool-autoscaling.bohr.io/scale-down-fraction"
-	historyRateWindowKey          = "pool-autoscaling.bohr.io/history-rate-window-seconds"
-	legacyIdleToZeroKey           = "pool-autoscaling.bohr.io/idle-to-zero-seconds"
-	safetyGuardKey                = "pool-autoscaling.bohr.io/safety-guard"
-	refillQuantileKey             = "pool-autoscaling.bohr.io/refill-quantile"
-	minLeadSamplesKey             = "pool-autoscaling.bohr.io/min-lead-samples"
-	leadSampleLimitKey            = "pool-autoscaling.bohr.io/lead-sample-limit"
+	enabledKey                = "pool-autoscaling.bohr.io/enabled"
+	minReplicasKey            = "pool-autoscaling.bohr.io/min-replicas"
+	maxReplicasKey            = "pool-autoscaling.bohr.io/max-replicas"
+	slaSecondsKey             = "pool-autoscaling.bohr.io/sla-seconds"
+	refillSecondsKey          = "pool-autoscaling.bohr.io/refill-seconds"
+	pendingDemandKey          = "pool-autoscaling.bohr.io/pending-demand"
+	pendingDemandTimeKey      = "pool-autoscaling.bohr.io/pending-demand-updated-at"
+	queueBoostFactorKey       = "pool-autoscaling.bohr.io/queue-boost-factor"
+	queueBoostMaxKey          = "pool-autoscaling.bohr.io/queue-boost-max"
+	maxScaleUpStepKey         = "pool-autoscaling.bohr.io/max-scale-up-step"
+	idleToMinSecondsKey       = "pool-autoscaling.bohr.io/idle-to-min-seconds"
+	scaleDownStabilizationKey = "pool-autoscaling.bohr.io/scale-down-stabilization-seconds"
+	scaleDownFractionKey      = "pool-autoscaling.bohr.io/scale-down-fraction"
+	legacyIdleToZeroKey       = "pool-autoscaling.bohr.io/idle-to-zero-seconds"
+	// Advanced escape hatches for supply-fault triage; leave untouched
+	// during normal operation.
 	capacityUtilizationKey        = "pool-autoscaling.bohr.io/capacity-utilization"
 	timeoutMultiplierKey          = "pool-autoscaling.bohr.io/supply-timeout-multiplier"
 	overflowBudgetKey             = "pool-autoscaling.bohr.io/overflow-budget"
-	overflowWindowKey             = "pool-autoscaling.bohr.io/overflow-window-seconds"
-	minOverflowSamplesKey         = "pool-autoscaling.bohr.io/min-overflow-samples"
-	drainBoostMaxKey              = "pool-autoscaling.bohr.io/drain-boost-max"
 	lastDecisionKey               = "pool-autoscaling.bohr.io/last-decision"
 	controllerStateKey            = "pool-autoscaling.bohr.io/state"
 	learnedRefillKey              = "pool-autoscaling.bohr.io/learned-refill-seconds"
@@ -711,6 +700,9 @@ func demandRate(events []demandEvent, now time.Time, windowSeconds float64) floa
 	return float64(count) / elapsed
 }
 
+// configFromAnnotations reads only the operator-facing knobs. Window sizes,
+// learning quantiles, guard inventory, and other internal mechanics are
+// frozen constants: they were tuned once and had no real-world overrides.
 func configFromAnnotations(annotations map[string]string) poolConfig {
 	minReplicas := max(0, parseInt(
 		firstNonEmpty(annotations[minReplicasKey], annotations[legacyMinReplicasKey]),
@@ -723,27 +715,18 @@ func configFromAnnotations(annotations map[string]string) poolConfig {
 	if maxReplicas < minReplicas {
 		maxReplicas = minReplicas
 	}
-	slowWindow := positiveFloat(annotations[rateWindowSecondsKey], defaultRateWindow)
-	fastWindow := min(
-		positiveFloat(annotations[fastRateWindowKey], defaultFastRateWindow),
-		slowWindow,
-	)
-	mediumWindow := min(
-		max(fastWindow, positiveFloat(annotations[mediumRateWindowKey], defaultMediumWindow)),
-		slowWindow,
-	)
 	return poolConfig{
 		minReplicas:       minReplicas,
 		maxReplicas:       max(0, maxReplicas),
 		slaSeconds:        positiveFloat(annotations[slaSecondsKey], defaultSLASeconds),
 		refillSeconds:     positiveFloat(annotations[refillSecondsKey], defaultRefillSeconds),
-		serviceQuantile:   boundedFloat(annotations[serviceQuantileKey], defaultServiceQuantile, 0.5001, 0.9999),
-		rateWindowSeconds: slowWindow,
-		fastRateWindow:    fastWindow,
-		mediumRateWindow:  mediumWindow,
-		pendingMaxAge:     positiveFloat(annotations[pendingDemandMaxAgeKey], defaultPendingMaxAge),
+		serviceQuantile:   defaultServiceQuantile,
+		rateWindowSeconds: defaultRateWindow,
+		fastRateWindow:    defaultFastRateWindow,
+		mediumRateWindow:  defaultMediumWindow,
+		pendingMaxAge:     defaultPendingMaxAge,
 		queueBoostFactor:  boundedFloat(annotations[queueBoostFactorKey], defaultQueueBoost, 0.0, 1.0),
-		queueBoostMax:     min(max(0, parseInt(annotations[queueBoostMaxKey], defaultQueueBoostMax)), maxReplicas),
+		queueBoostMax:     min(max(0, parseInt(annotations[queueBoostMaxKey], defaultQueueBoostMax)), max(0, maxReplicas)),
 		maxScaleUpStep:    max(0, parseInt(annotations[maxScaleUpStepKey], defaultMaxScaleUpStep)),
 		idleToMinSeconds: positiveFloat(
 			firstNonEmpty(annotations[idleToMinSecondsKey], annotations[legacyIdleToZeroKey]),
@@ -751,17 +734,17 @@ func configFromAnnotations(annotations map[string]string) poolConfig {
 		),
 		scaleDownStabilization: positiveFloat(annotations[scaleDownStabilizationKey], defaultScaleDownStabilization),
 		scaleDownFraction:      boundedFloat(annotations[scaleDownFractionKey], defaultScaleDownFraction, 0.01, 0.5),
-		historyRateWindow:      positiveFloat(annotations[historyRateWindowKey], defaultHistoryWindow),
-		safetyGuard:            max(0, parseInt(annotations[safetyGuardKey], defaultSafetyGuard)),
-		refillQuantile:         boundedFloat(annotations[refillQuantileKey], defaultRefillQuantile, 0.5001, 1.0),
-		minLeadSamples:         max(1, parseInt(annotations[minLeadSamplesKey], defaultMinLeadSamples)),
-		leadSampleLimit:        max(10, parseInt(annotations[leadSampleLimitKey], defaultLeadSampleLimit)),
+		historyRateWindow:      defaultHistoryWindow,
+		safetyGuard:            defaultSafetyGuard,
+		refillQuantile:         defaultRefillQuantile,
+		minLeadSamples:         defaultMinLeadSamples,
+		leadSampleLimit:        defaultLeadSampleLimit,
 		capacityUsage:          boundedFloat(annotations[capacityUtilizationKey], defaultCapacityUsage, 0.05, 1.0),
 		timeoutMultiplier:      positiveFloat(annotations[timeoutMultiplierKey], defaultTimeoutMultiple),
 		overflowBudget:         boundedFloat(annotations[overflowBudgetKey], defaultOverflowBudget, 0.0, 0.20),
-		overflowWindow:         positiveFloat(annotations[overflowWindowKey], defaultOverflowWindow),
-		minOverflowSamples:     max(1, parseInt(annotations[minOverflowSamplesKey], defaultMinOverflowSamples)),
-		drainBoostMax:          boundedFloat(annotations[drainBoostMaxKey], defaultDrainBoostMax, 1.0, 10.0),
+		overflowWindow:         defaultOverflowWindow,
+		minOverflowSamples:     defaultMinOverflowSamples,
+		drainBoostMax:          defaultDrainBoostMax,
 	}
 }
 

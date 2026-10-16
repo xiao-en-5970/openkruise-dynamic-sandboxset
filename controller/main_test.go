@@ -257,7 +257,6 @@ func TestReconcilePoolRestoresNonZeroMinimumWithoutDemand(t *testing.T) {
 				enabledKey:     "true",
 				minReplicasKey: "1",
 				maxReplicasKey: "10",
-				safetyGuardKey: "0",
 			},
 		},
 		"spec": map[string]any{"replicas": int64(0)},
@@ -305,7 +304,6 @@ func TestReconcilePoolDropsDirectlyToConfiguredMinimumAfterIdle(t *testing.T) {
 				minReplicasKey:      "37",
 				maxReplicasKey:      "1000",
 				idleToMinSecondsKey: "30",
-				safetyGuardKey:      "0",
 			},
 		},
 		"spec": map[string]any{"replicas": int64(500)},
@@ -422,7 +420,6 @@ func TestPendingDemandWakesZeroPoolAndBoostsIntent(t *testing.T) {
 				enabledKey:     "true",
 				minReplicasKey: "0",
 				maxReplicasKey: "50",
-				safetyGuardKey: "0",
 			},
 		},
 		"spec": map[string]any{"replicas": int64(0)},
@@ -450,14 +447,14 @@ func TestPendingDemandWakesZeroPoolAndBoostsIntent(t *testing.T) {
 		t.Fatalf("get updated SandboxSet: %v", err)
 	}
 	replicas, _, _ := unstructured.NestedInt64(updated.Object, "spec", "replicas")
-	if replicas != 6 {
-		t.Fatalf("weighted queue debt should wake pool to 6, got %d", replicas)
+	if replicas != 8 {
+		t.Fatalf("weighted queue debt 6 plus frozen guard 2 should wake pool to 8, got %d", replicas)
 	}
 	annotations := updated.GetAnnotations()
 	if annotations[controllerStateKey] != "SURGE" ||
 		annotations[pendingObservedKey] != "12" ||
 		annotations[queueBoostKey] != "6" ||
-		annotations[intentKey] != "6" {
+		annotations[intentKey] != "8" {
 		t.Fatalf("unexpected queue-aware decision annotations: %#v", annotations)
 	}
 }
