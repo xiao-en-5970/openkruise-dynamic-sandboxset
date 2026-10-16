@@ -31,6 +31,7 @@ CONFIG_FIELDS = [
     "duration_seconds",
     "seed",
     "initial_replicas",
+    "min_replicas",
     "max_replicas",
     "sla_seconds",
     "arrival_pattern",
@@ -49,6 +50,8 @@ CONFIG_FIELDS = [
     "max_unavailable",
     "replenish_mode",
     "control_interval",
+    "fast_rate_window",
+    "medium_rate_window",
     "rate_window",
     "scale_up_factor",
     "scale_down_interval",
@@ -56,10 +59,17 @@ CONFIG_FIELDS = [
     "service_quantile",
     "lead_quantile",
     "min_guard",
+    "queue_boost_factor",
+    "queue_boost_max",
+    "production_max_scale_up_step",
     "production_scale_down_fraction",
     "production_stabilization",
+    "idle_to_min_seconds",
     "capacity_utilization",
     "supply_timeout_multiplier",
+    "cold_start",
+    "cold_refill_multiplier",
+    "overflow_budget",
 ]
 
 
@@ -144,13 +154,16 @@ def _summary_rows(simulator: WarmPoolSimulator) -> list[list[Any]]:
     return [
         ["请求总数", summary.requests],
         ["即时交付", summary.immediate],
+        ["冷启动交付", summary.cold_served],
         ["仍在排队", summary.pending],
         ["SLA 命中率", f"{summary.sla_rate:.2%}"],
         ["发生等待比例", f"{summary.cold_wait_rate:.2%}"],
+        ["冷启动溢出率", f"{summary.overflow_rate:.2%}"],
         ["P50 / P95 / P99", f"{summary.p50_wait:.1f}s / {summary.p95_wait:.1f}s / {summary.p99_wait:.1f}s"],
         ["最大等待", f"{summary.max_wait:.1f}s"],
         ["当前 / 峰值目标池", f"{summary.final_target} / {summary.peak_target}"],
         ["预热资源成本", f"{summary.warm_sandbox_seconds:,.0f} sandbox·s"],
+        ["冷启动资源成本", f"{summary.cold_sandbox_seconds:,.0f} sandbox·s"],
         ["扩缩容 / 熔断时间", f"{summary.scale_events} 次 / {summary.breaker_seconds:.0f}s"],
     ]
 
@@ -382,14 +395,21 @@ def build_app() -> gr.Blocks:
                         500,
                         defaults.initial_replicas,
                         step=1,
-                        label="开始时已经准备好的沙盒数",
+                        label="预热池起始大小",
+                    )
+                    minimum = gr.Slider(
+                        0,
+                        500,
+                        defaults.min_replicas,
+                        step=1,
+                        label="预热池最小大小（min-scale）",
                     )
                     maximum = gr.Slider(
-                        10,
+                        0,
                         2000,
                         defaults.max_replicas,
                         step=10,
-                        label="最多允许准备多少个沙盒",
+                        label="预热池最大大小（0 表示不限制）",
                     )
                     sla = gr.Slider(
                         1,
@@ -510,8 +530,14 @@ def build_app() -> gr.Blocks:
                     control_interval = gr.Slider(
                         1, 60, defaults.control_interval, step=1, label="多久重新计算一次"
                     )
+                    fast_rate_window = gr.Slider(
+                        1, 60, defaults.fast_rate_window, step=1, label="新算法短期流量窗口"
+                    )
+                    medium_rate_window = gr.Slider(
+                        5, 120, defaults.medium_rate_window, step=5, label="新算法中期流量窗口"
+                    )
                     rate_window = gr.Slider(
-                        5, 600, defaults.rate_window, step=5, label="旧算法观察多久的流量"
+                        5, 600, defaults.rate_window, step=5, label="慢速流量观察窗口"
                     )
                     scale_up_factor = gr.Slider(
                         1.1, 4, defaults.scale_up_factor, step=0.1, label="旧算法每次扩容倍数"
@@ -543,6 +569,27 @@ def build_app() -> gr.Blocks:
                         step=1,
                         label="新算法额外保底沙盒数",
                     )
+                    queue_boost_factor = gr.Slider(
+                        0,
+                        1,
+                        defaults.queue_boost_factor,
+                        step=0.05,
+                        label="排队需求有多少比例转成额外预热库存",
+                    )
+                    queue_boost_max = gr.Slider(
+                        0,
+                        500,
+                        defaults.queue_boost_max,
+                        step=1,
+                        label="排队补偿最多增加多少个（0 表示不限制）",
+                    )
+                    production_max_scale_up_step = gr.Slider(
+                        0,
+                        500,
+                        defaults.production_max_scale_up_step,
+                        step=1,
+                        label="新算法每轮最多扩容多少个（0 表示不限制）",
+                    )
                     production_scale_down_fraction = gr.Slider(
                         0.01,
                         0.5,
@@ -557,6 +604,13 @@ def build_app() -> gr.Blocks:
                         step=5,
                         label="新算法缩容前稳定观察时间",
                     )
+                    idle_to_min_seconds = gr.Slider(
+                        5,
+                        600,
+                        defaults.idle_to_min_seconds,
+                        step=5,
+                        label="持续无流量多久后直接降到 min-scale",
+                    )
                     capacity_utilization = gr.Slider(
                         0.1,
                         0.99,
@@ -570,6 +624,25 @@ def build_app() -> gr.Blocks:
                         defaults.supply_timeout_multiplier,
                         step=0.5,
                         label="超过正常补货时间多少倍算异常",
+                    )
+                with gr.Accordion("冷启动兼容（createOnNoStock 兜底）", open=False):
+                    cold_start = gr.Checkbox(
+                        defaults.cold_start,
+                        label="空池请求走冷启动兜底，不再排队等池",
+                    )
+                    cold_refill_multiplier = gr.Slider(
+                        0.5,
+                        5,
+                        defaults.cold_refill_multiplier,
+                        step=0.1,
+                        label="冷启动比池补货慢多少倍",
+                    )
+                    overflow_budget = gr.Slider(
+                        0,
+                        0.2,
+                        defaults.overflow_budget,
+                        step=0.01,
+                        label="允许的冷启动溢出预算（0=旧P99口径）",
                     )
             with gr.Column(scale=5):
                 status = gr.Markdown("调整左侧参数后，可以单独运行一个算法，也可以在页面底部直接比较新旧算法。")
@@ -601,6 +674,7 @@ def build_app() -> gr.Blocks:
             duration,
             seed,
             initial,
+            minimum,
             maximum,
             sla,
             arrival_pattern,
@@ -619,6 +693,8 @@ def build_app() -> gr.Blocks:
             max_unavailable,
             replenish_mode,
             control_interval,
+            fast_rate_window,
+            medium_rate_window,
             rate_window,
             scale_up_factor,
             scale_down_interval,
@@ -626,10 +702,17 @@ def build_app() -> gr.Blocks:
             service_quantile,
             lead_quantile,
             min_guard,
+            queue_boost_factor,
+            queue_boost_max,
+            production_max_scale_up_step,
             production_scale_down_fraction,
             production_stabilization,
+            idle_to_min_seconds,
             capacity_utilization,
             supply_timeout_multiplier,
+            cold_start,
+            cold_refill_multiplier,
+            overflow_budget,
         ]
         dashboard_outputs = [session, inventory_plot, wait_plot, metrics, events, status]
         reset.click(

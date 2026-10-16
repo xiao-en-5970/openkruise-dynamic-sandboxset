@@ -36,87 +36,131 @@ var (
 )
 
 const (
-	enabledKey             = "pool-autoscaling.bohr.io/enabled"
-	minReplicasKey         = "pool-autoscaling.bohr.io/min-replicas"
-	maxReplicasKey         = "pool-autoscaling.bohr.io/max-replicas"
-	slaSecondsKey          = "pool-autoscaling.bohr.io/sla-seconds"
-	refillSecondsKey       = "pool-autoscaling.bohr.io/refill-seconds"
-	serviceQuantileKey     = "pool-autoscaling.bohr.io/service-quantile"
-	rateWindowSecondsKey   = "pool-autoscaling.bohr.io/rate-window-seconds"
-	fastRateWindowKey      = "pool-autoscaling.bohr.io/fast-rate-window-seconds"
-	mediumRateWindowKey    = "pool-autoscaling.bohr.io/medium-rate-window-seconds"
-	pendingDemandKey       = "pool-autoscaling.bohr.io/pending-demand"
-	pendingDemandTimeKey   = "pool-autoscaling.bohr.io/pending-demand-updated-at"
-	pendingDemandMaxAgeKey = "pool-autoscaling.bohr.io/pending-demand-max-age-seconds"
-	idleToMinSecondsKey    = "pool-autoscaling.bohr.io/idle-to-min-seconds"
-	legacyIdleToZeroKey    = "pool-autoscaling.bohr.io/idle-to-zero-seconds"
-	safetyGuardKey         = "pool-autoscaling.bohr.io/safety-guard"
-	refillQuantileKey      = "pool-autoscaling.bohr.io/refill-quantile"
-	minLeadSamplesKey      = "pool-autoscaling.bohr.io/min-lead-samples"
-	leadSampleLimitKey     = "pool-autoscaling.bohr.io/lead-sample-limit"
-	capacityUtilizationKey = "pool-autoscaling.bohr.io/capacity-utilization"
-	timeoutMultiplierKey   = "pool-autoscaling.bohr.io/supply-timeout-multiplier"
-	lastDecisionKey        = "pool-autoscaling.bohr.io/last-decision"
-	controllerStateKey     = "pool-autoscaling.bohr.io/state"
-	learnedRefillKey       = "pool-autoscaling.bohr.io/learned-refill-seconds"
-	refillSourceKey        = "pool-autoscaling.bohr.io/refill-source"
-	refillSamplesKey       = "pool-autoscaling.bohr.io/refill-samples"
-	demandRateKey          = "pool-autoscaling.bohr.io/demand-rate"
-	demandRateFastKey      = "pool-autoscaling.bohr.io/demand-rate-fast"
-	demandRateMediumKey    = "pool-autoscaling.bohr.io/demand-rate-medium"
-	demandRateSlowKey      = "pool-autoscaling.bohr.io/demand-rate-slow"
-	pendingObservedKey     = "pool-autoscaling.bohr.io/pending-demand-observed"
-	queueBoostKey          = "pool-autoscaling.bohr.io/queue-boost"
-	supplyCapacityKey      = "pool-autoscaling.bohr.io/supply-capacity-rate"
-	intentKey              = "pool-autoscaling.bohr.io/target-intent"
-	appliedKey             = "pool-autoscaling.bohr.io/target-applied"
-	legacyEnabledKey       = "dynamic-pool"
-	legacyMinReplicasKey   = "min-scale"
-	legacyMaxReplicasKey   = "max-scale"
-	defaultMinReplicas     = 1
-	defaultMaxReplicas     = 100
-	defaultSLASeconds      = 10.0
-	defaultRefillSeconds   = 40.0
-	defaultServiceQuantile = 0.99
-	defaultRateWindow      = 60.0
-	defaultFastRateWindow  = 5.0
-	defaultMediumWindow    = 15.0
-	defaultPendingMaxAge   = 30.0
-	defaultIdleToMin       = 600.0
-	defaultSafetyGuard     = 2
-	defaultRefillQuantile  = 0.95
-	defaultMinLeadSamples  = 5
-	defaultLeadSampleLimit = 128
-	defaultCapacityUsage   = 0.8
-	defaultTimeoutMultiple = 3.0
-	sandboxPoolLabel       = "agents.kruise.io/sandbox-pool"
-	sandboxClaimedLabel    = "agents.kruise.io/sandbox-claimed"
-	sandboxClaimNameLabel  = "agents.kruise.io/claim-name"
-	sandboxClaimTimeKey    = "agents.kruise.io/claim-timestamp"
+	enabledKey                    = "pool-autoscaling.bohr.io/enabled"
+	minReplicasKey                = "pool-autoscaling.bohr.io/min-replicas"
+	maxReplicasKey                = "pool-autoscaling.bohr.io/max-replicas"
+	slaSecondsKey                 = "pool-autoscaling.bohr.io/sla-seconds"
+	refillSecondsKey              = "pool-autoscaling.bohr.io/refill-seconds"
+	serviceQuantileKey            = "pool-autoscaling.bohr.io/service-quantile"
+	rateWindowSecondsKey          = "pool-autoscaling.bohr.io/rate-window-seconds"
+	fastRateWindowKey             = "pool-autoscaling.bohr.io/fast-rate-window-seconds"
+	mediumRateWindowKey           = "pool-autoscaling.bohr.io/medium-rate-window-seconds"
+	pendingDemandKey              = "pool-autoscaling.bohr.io/pending-demand"
+	pendingDemandTimeKey          = "pool-autoscaling.bohr.io/pending-demand-updated-at"
+	pendingDemandMaxAgeKey        = "pool-autoscaling.bohr.io/pending-demand-max-age-seconds"
+	queueBoostFactorKey           = "pool-autoscaling.bohr.io/queue-boost-factor"
+	queueBoostMaxKey              = "pool-autoscaling.bohr.io/queue-boost-max"
+	maxScaleUpStepKey             = "pool-autoscaling.bohr.io/max-scale-up-step"
+	idleToMinSecondsKey           = "pool-autoscaling.bohr.io/idle-to-min-seconds"
+	scaleDownStabilizationKey     = "pool-autoscaling.bohr.io/scale-down-stabilization-seconds"
+	scaleDownFractionKey          = "pool-autoscaling.bohr.io/scale-down-fraction"
+	historyRateWindowKey          = "pool-autoscaling.bohr.io/history-rate-window-seconds"
+	legacyIdleToZeroKey           = "pool-autoscaling.bohr.io/idle-to-zero-seconds"
+	safetyGuardKey                = "pool-autoscaling.bohr.io/safety-guard"
+	refillQuantileKey             = "pool-autoscaling.bohr.io/refill-quantile"
+	minLeadSamplesKey             = "pool-autoscaling.bohr.io/min-lead-samples"
+	leadSampleLimitKey            = "pool-autoscaling.bohr.io/lead-sample-limit"
+	capacityUtilizationKey        = "pool-autoscaling.bohr.io/capacity-utilization"
+	timeoutMultiplierKey          = "pool-autoscaling.bohr.io/supply-timeout-multiplier"
+	overflowBudgetKey             = "pool-autoscaling.bohr.io/overflow-budget"
+	overflowWindowKey             = "pool-autoscaling.bohr.io/overflow-window-seconds"
+	minOverflowSamplesKey         = "pool-autoscaling.bohr.io/min-overflow-samples"
+	drainBoostMaxKey              = "pool-autoscaling.bohr.io/drain-boost-max"
+	lastDecisionKey               = "pool-autoscaling.bohr.io/last-decision"
+	controllerStateKey            = "pool-autoscaling.bohr.io/state"
+	learnedRefillKey              = "pool-autoscaling.bohr.io/learned-refill-seconds"
+	refillSourceKey               = "pool-autoscaling.bohr.io/refill-source"
+	refillSamplesKey              = "pool-autoscaling.bohr.io/refill-samples"
+	demandRateKey                 = "pool-autoscaling.bohr.io/demand-rate"
+	demandRateFastKey             = "pool-autoscaling.bohr.io/demand-rate-fast"
+	demandRateMediumKey           = "pool-autoscaling.bohr.io/demand-rate-medium"
+	demandRateSlowKey             = "pool-autoscaling.bohr.io/demand-rate-slow"
+	pendingObservedKey            = "pool-autoscaling.bohr.io/pending-demand-observed"
+	queueBoostKey                 = "pool-autoscaling.bohr.io/queue-boost"
+	supplyCapacityKey             = "pool-autoscaling.bohr.io/supply-capacity-rate"
+	intentKey                     = "pool-autoscaling.bohr.io/target-intent"
+	appliedKey                    = "pool-autoscaling.bohr.io/target-applied"
+	overflowRatioKey              = "pool-autoscaling.bohr.io/overflow-ratio"
+	coldServedKey                 = "pool-autoscaling.bohr.io/cold-served-replicas"
+	zEffectiveKey                 = "pool-autoscaling.bohr.io/z-effective"
+	drainBoostKey                 = "pool-autoscaling.bohr.io/drain-boost"
+	legacyEnabledKey              = "dynamic-pool"
+	legacyMinReplicasKey          = "min-scale"
+	legacyMaxReplicasKey          = "max-scale"
+	defaultMinReplicas            = 1
+	defaultMaxReplicas            = 100
+	defaultSLASeconds             = 10.0
+	defaultRefillSeconds          = 40.0
+	defaultServiceQuantile        = 0.99
+	defaultRateWindow             = 60.0
+	defaultFastRateWindow         = 5.0
+	defaultMediumWindow           = 15.0
+	defaultPendingMaxAge          = 30.0
+	defaultQueueBoost             = 0.5
+	defaultQueueBoostMax          = 10
+	defaultMaxScaleUpStep         = 10
+	defaultIdleToMin              = 120.0
+	defaultScaleDownStabilization = 180.0
+	defaultScaleDownFraction      = 0.05
+	defaultHistoryWindow          = 3600.0
+	defaultSafetyGuard            = 2
+	defaultRefillQuantile         = 0.95
+	defaultMinLeadSamples         = 5
+	defaultLeadSampleLimit        = 128
+	defaultCapacityUsage          = 0.8
+	defaultTimeoutMultiple        = 3.0
+	defaultOverflowBudget         = 0.05
+	defaultOverflowWindow         = 900.0
+	defaultMinOverflowSamples     = 20
+	defaultDrainBoostMax          = 3.0
+	minEffectiveZ                 = 0.84
+	maxEffectiveZ                 = 3.09
+	drainFractionCap              = 0.30
+	sandboxPoolLabel              = "agents.kruise.io/sandbox-pool"
+	sandboxClaimedLabel           = "agents.kruise.io/sandbox-claimed"
+	sandboxClaimNameLabel         = "agents.kruise.io/claim-name"
+	sandboxClaimTimeKey           = "agents.kruise.io/claim-timestamp"
+	// sandbox-agent writes agents.kruise.io/sandbox-priority=100 exclusively on
+	// the cold-create path (newSandboxFromSandboxSet); pool-refill members never
+	// carry it, so it is the upstream marker distinguishing cold-started
+	// sandboxes from warm-pool claims.
+	sandboxPriorityKey = "agents.kruise.io/sandbox-priority"
+	coldPriorityValue  = "100"
 )
 
 type demandEvent struct {
 	at       time.Time
 	replicas int
+	uid      string
 }
 
 type poolConfig struct {
-	minReplicas       int
-	maxReplicas       int
-	slaSeconds        float64
-	refillSeconds     float64
-	serviceQuantile   float64
-	rateWindowSeconds float64
-	fastRateWindow    float64
-	mediumRateWindow  float64
-	pendingMaxAge     float64
-	idleToMinSeconds  float64
-	safetyGuard       int
-	refillQuantile    float64
-	minLeadSamples    int
-	leadSampleLimit   int
-	capacityUsage     float64
-	timeoutMultiplier float64
+	minReplicas            int
+	maxReplicas            int
+	slaSeconds             float64
+	refillSeconds          float64
+	serviceQuantile        float64
+	rateWindowSeconds      float64
+	fastRateWindow         float64
+	mediumRateWindow       float64
+	pendingMaxAge          float64
+	queueBoostFactor       float64
+	queueBoostMax          int
+	maxScaleUpStep         int
+	idleToMinSeconds       float64
+	scaleDownStabilization float64
+	scaleDownFraction      float64
+	historyRateWindow      float64
+	safetyGuard            int
+	refillQuantile         float64
+	minLeadSamples         int
+	leadSampleLimit        int
+	capacityUsage          float64
+	timeoutMultiplier      float64
+	overflowBudget         float64
+	overflowWindow         float64
+	minOverflowSamples     int
+	drainBoostMax          float64
 }
 
 type controller struct {
@@ -224,7 +268,8 @@ func (c *controller) reconcile(ctx context.Context) error {
 	}
 
 	events := make(map[string][]demandEvent)
-	pendingByPool := make(map[string]int)
+	poolPendingByPool := make(map[string]int)
+	coldPendingByPool := make(map[string]int)
 	for index := range claims.Items {
 		claim := &claims.Items[index]
 		templateName, found, _ := unstructured.NestedString(claim.Object, "spec", "templateName")
@@ -238,11 +283,20 @@ func (c *controller) reconcile(ctx context.Context) error {
 		}
 		key := claim.GetNamespace() + "/" + templateName
 		events[key] = append(events[key], demandEvent{
-			at: claim.GetCreationTimestamp().Time, replicas: replicas,
+			at:       claim.GetCreationTimestamp().Time,
+			replicas: replicas,
+			uid:      string(claim.GetUID()),
 		})
-		pendingByPool[key] += claimPendingReplicas(claim, replicas)
+		pending := claimPendingReplicas(claim, replicas)
+		if claimCreatesOnNoStock(claim) {
+			coldPendingByPool[key] += pending
+		} else {
+			poolPendingByPool[key] += pending
+		}
 	}
 	supply := make(map[string][]supplyObservation)
+	overflow := make(map[string][]overflowObservation)
+	coldInflightByPool := make(map[string]int)
 	for index := range sandboxes.Items {
 		sandbox := &sandboxes.Items[index]
 		labels := sandbox.GetLabels()
@@ -255,7 +309,13 @@ func (c *controller) reconcile(ctx context.Context) error {
 			events[key] = append(events[key], event)
 		}
 		if labels[sandboxClaimedLabel] == "true" {
+			if observation, found := overflowObservationFromSandbox(sandbox); found {
+				overflow[key] = append(overflow[key], observation)
+			}
 			continue
+		}
+		if sandbox.GetAnnotations()[sandboxPriorityKey] == coldPriorityValue {
+			coldInflightByPool[key]++
 		}
 		ready, readyAt := sandboxReady(sandbox)
 		supply[key] = append(supply[key], supplyObservation{
@@ -278,7 +338,9 @@ func (c *controller) reconcile(ctx context.Context) error {
 		activePools[poolID] = struct{}{}
 		key := set.GetNamespace() + "/" + set.GetName()
 		if err := c.reconcilePool(
-			ctx, set, events[key], supply[key], pendingByPool[key], now,
+			ctx, set, events[key], supply[key],
+			poolPendingByPool[key], coldPendingByPool[key],
+			overflow[key], coldInflightByPool[key], now,
 		); err != nil {
 			failures = append(failures, set.GetNamespace()+"/"+set.GetName()+": "+err.Error())
 		}
@@ -299,13 +361,24 @@ func (c *controller) reconcilePool(
 	set *unstructured.Unstructured,
 	events []demandEvent,
 	supply []supplyObservation,
-	claimPending int,
+	poolClaimPending int,
+	coldClaimPending int,
+	overflow []overflowObservation,
+	coldInflight int,
 	now time.Time,
 ) error {
 	annotations := set.GetAnnotations()
 	config := configFromAnnotations(annotations)
 	poolID := persistentPoolID(set)
-	c.state.observeReady(poolID, supply, config.leadSampleLimit)
+	coldPressure := max(coldClaimPending, coldInflight)
+	c.state.observeReady(poolID, supply, config.leadSampleLimit, coldPressure)
+	c.state.observeDemand(poolID, events, config.historyRateWindow, now)
+	c.state.observeOverflow(poolID, overflow, config.overflowWindow, now)
+	overflowRatio, coldServed, warmServed := c.state.overflowRatio(
+		poolID, now, config.overflowWindow,
+	)
+	overflowSamples := coldServed + warmServed
+	overflowEnough := overflowSamples >= config.minOverflowSamples
 	refillSeconds, sampleCount, learned := c.state.leadTime(
 		poolID,
 		config.refillQuantile,
@@ -349,52 +422,109 @@ func (c *controller) reconcilePool(
 	}
 	pending := min(
 		config.maxReplicas,
-		min(max(0, claimPending), config.maxReplicas)+
+		min(max(0, poolClaimPending), config.maxReplicas)+
+			min(max(0, coldClaimPending), config.maxReplicas)+
 			min(externalPending, config.maxReplicas),
 	)
-	queueBoost := pending
+	boostablePending := min(
+		config.maxReplicas,
+		min(max(0, poolClaimPending), config.maxReplicas)+
+			min(externalPending, config.maxReplicas),
+	)
+	queueBoost := calculateQueueBoost(
+		boostablePending, config.queueBoostFactor, config.queueBoostMax,
+	)
 	fastRate := demandRate(events, now, config.fastRateWindow)
 	mediumRate := demandRate(events, now, config.mediumRateWindow)
 	slowRate := demandRate(events, now, config.rateWindowSeconds)
+	historyRate := c.state.recentAverageRate(poolID, now, config.historyRateWindow)
+	if historyRate <= 0 {
+		historyRate = demandAverageRate(events, now, config.historyRateWindow)
+	}
 	rate := max(fastRate, mediumRate, slowRate)
+	trafficFloor := calculateTrafficFloor(historyRate, refillSeconds, config.minReplicas)
 	recentReplicas := demandCount(events, now, config.rateWindowSeconds)
+	zBase := quantileZ(config.serviceQuantile)
+	zAdjust := 0.0
+	if config.overflowBudget > 0 {
+		zBase = quantileZ(1 - config.overflowBudget)
+		if overflowEnough {
+			delta := 0.0
+			switch {
+			case overflowRatio > 2*config.overflowBudget:
+				delta = 0.15
+			case overflowRatio == 0:
+				delta = -0.05
+			case overflowRatio < config.overflowBudget/2:
+				delta = -0.10
+			}
+			zAdjust = c.state.stepZAdjustment(
+				poolID, now, config.scaleDownStabilization, delta,
+			)
+		}
+	}
+	zEffective := min(max(zBase+zAdjust, minEffectiveZ), maxEffectiveZ)
+	drainBoostActive := config.overflowBudget > 0 && config.drainBoostMax > 1.0 &&
+		overflowEnough && overflowRatio == 0 && pending == 0
 	rawTarget := calculateTarget(
 		rate,
 		refillSeconds,
 		config.slaSeconds,
-		config.serviceQuantile,
+		zEffective,
 		config.safetyGuard,
 	) + queueBoost
-	intent := clamp(rawTarget, config.minReplicas, config.maxReplicas)
+	intent := clamp(rawTarget, trafficFloor, config.maxReplicas)
+	c.state.rememberIntent(poolID, now, intent, config.scaleDownStabilization)
 	state := "NORMAL"
 
 	idleFor := now.Sub(latestDemand).Seconds()
 	hasDemand := recentReplicas > 0 || pending > 0
-	if !hasDemand {
-		if current < config.minReplicas || idleFor >= config.idleToMinSeconds {
-			intent = config.minReplicas
+	idleExpired := pending == 0 && idleFor >= config.idleToMinSeconds
+	if idleExpired {
+		intent = trafficFloor
+		c.state.resetIntentHistory(poolID, now, trafficFloor)
+		state = "IDLE"
+	} else if !hasDemand {
+		if current < trafficFloor {
+			intent = trafficFloor
 		} else {
 			intent = current
 			state = "RECOVERING"
 		}
-	} else if pending > 0 || intent > current || fastRate > slowRate {
-		state = "SURGE"
+	} else {
+		if pending > 0 || intent > current || fastRate > slowRate {
+			state = "SURGE"
+		}
+		if intent < current {
+			intent = max(
+				trafficFloor,
+				applyGradualScaleDown(
+					current,
+					intent,
+					c.state.stabilizedIntentFloor(poolID, intent),
+					pending,
+					effectiveDrainFraction(config.scaleDownFraction, config.drainBoostMax, drainBoostActive),
+				),
+			)
+		}
 	}
 
 	capacityExceeded := rate > supplyCapacityRate && rate > 0
 	supplyTimedOut := creating > 0 &&
 		oldestCreatingAge > refillSeconds*config.timeoutMultiplier
 	applied := applySupplyGate(
-		intent, current, actual, creating, maxUnavailable, config.capacityUsage, supplyTimedOut,
+		intent, current, actual, creating, maxUnavailable, config.capacityUsage,
+		config.maxScaleUpStep, supplyTimedOut,
 	)
 	if capacityExceeded || supplyTimedOut {
 		state = "DEGRADED"
 	}
 
 	decision := fmt.Sprintf(
-		"state=%s rate=%.3f/s fast=%.3f medium=%.3f slow=%.3f pending=%d lead=%.1fs intent=%d applied=%d creating=%d/%d",
-		state, rate, fastRate, mediumRate, slowRate, pending,
+		"state=%s rate=%.3f/s fast=%.3f medium=%.3f slow=%.3f hour=%.3f floor=%d pending=%d queue-boost=%d lead=%.1fs intent=%d applied=%d creating=%d/%d overflow=%.3f cold=%d z=%.2f drain-boost=%t",
+		state, rate, fastRate, mediumRate, slowRate, historyRate, trafficFloor, pending, queueBoost,
 		refillSeconds, intent, applied, creating, maxUnavailable,
+		overflowRatio, coldServed, zEffective, drainBoostActive,
 	)
 	annotationUpdates := map[string]string{
 		lastDecisionKey:     decision,
@@ -411,6 +541,10 @@ func (c *controller) reconcilePool(
 		supplyCapacityKey:   fmt.Sprintf("%.6f", supplyCapacityRate),
 		intentKey:           strconv.Itoa(intent),
 		appliedKey:          strconv.Itoa(applied),
+		overflowRatioKey:    fmt.Sprintf("%.4f", overflowRatio),
+		coldServedKey:       strconv.Itoa(coldServed),
+		zEffectiveKey:       fmt.Sprintf("%.3f", zEffective),
+		drainBoostKey:       map[bool]string{true: "true", false: "false"}[drainBoostActive],
 	}
 	c.metrics.setPool(poolID, poolMetrics{
 		namespace:          set.GetNamespace(),
@@ -430,6 +564,10 @@ func (c *controller) reconcilePool(
 		applied:            applied,
 		available:          available,
 		creating:           creating,
+		overflowRatio:      overflowRatio,
+		coldServed:         coldServed,
+		zEffective:         zEffective,
+		drainBoost:         drainBoostActive,
 	})
 
 	patch := map[string]any{}
@@ -489,6 +627,16 @@ func claimPendingReplicas(claim *unstructured.Unstructured, requested int) int {
 	return max(0, requested-int(claimed64))
 }
 
+func claimCreatesOnNoStock(claim *unstructured.Unstructured) bool {
+	createOnNoStock, found, _ := unstructured.NestedBool(
+		claim.Object, "spec", "createOnNoStock",
+	)
+	if !found {
+		return true
+	}
+	return createOnNoStock
+}
+
 func pendingDemandFromAnnotations(
 	annotations map[string]string,
 	now time.Time,
@@ -530,6 +678,13 @@ func demandCount(events []demandEvent, now time.Time, windowSeconds float64) int
 		total += max(0, event.replicas)
 	}
 	return total
+}
+
+func demandAverageRate(events []demandEvent, now time.Time, windowSeconds float64) float64 {
+	if windowSeconds <= 0 {
+		return 0
+	}
+	return float64(demandCount(events, now, windowSeconds)) / windowSeconds
 }
 
 func demandRate(events []demandEvent, now time.Time, windowSeconds float64) float64 {
@@ -587,16 +742,26 @@ func configFromAnnotations(annotations map[string]string) poolConfig {
 		fastRateWindow:    fastWindow,
 		mediumRateWindow:  mediumWindow,
 		pendingMaxAge:     positiveFloat(annotations[pendingDemandMaxAgeKey], defaultPendingMaxAge),
+		queueBoostFactor:  boundedFloat(annotations[queueBoostFactorKey], defaultQueueBoost, 0.0, 1.0),
+		queueBoostMax:     min(max(0, parseInt(annotations[queueBoostMaxKey], defaultQueueBoostMax)), maxReplicas),
+		maxScaleUpStep:    max(0, parseInt(annotations[maxScaleUpStepKey], defaultMaxScaleUpStep)),
 		idleToMinSeconds: positiveFloat(
 			firstNonEmpty(annotations[idleToMinSecondsKey], annotations[legacyIdleToZeroKey]),
 			defaultIdleToMin,
 		),
-		safetyGuard:       max(0, parseInt(annotations[safetyGuardKey], defaultSafetyGuard)),
-		refillQuantile:    boundedFloat(annotations[refillQuantileKey], defaultRefillQuantile, 0.5001, 1.0),
-		minLeadSamples:    max(1, parseInt(annotations[minLeadSamplesKey], defaultMinLeadSamples)),
-		leadSampleLimit:   max(10, parseInt(annotations[leadSampleLimitKey], defaultLeadSampleLimit)),
-		capacityUsage:     boundedFloat(annotations[capacityUtilizationKey], defaultCapacityUsage, 0.05, 1.0),
-		timeoutMultiplier: positiveFloat(annotations[timeoutMultiplierKey], defaultTimeoutMultiple),
+		scaleDownStabilization: positiveFloat(annotations[scaleDownStabilizationKey], defaultScaleDownStabilization),
+		scaleDownFraction:      boundedFloat(annotations[scaleDownFractionKey], defaultScaleDownFraction, 0.01, 0.5),
+		historyRateWindow:      positiveFloat(annotations[historyRateWindowKey], defaultHistoryWindow),
+		safetyGuard:            max(0, parseInt(annotations[safetyGuardKey], defaultSafetyGuard)),
+		refillQuantile:         boundedFloat(annotations[refillQuantileKey], defaultRefillQuantile, 0.5001, 1.0),
+		minLeadSamples:         max(1, parseInt(annotations[minLeadSamplesKey], defaultMinLeadSamples)),
+		leadSampleLimit:        max(10, parseInt(annotations[leadSampleLimitKey], defaultLeadSampleLimit)),
+		capacityUsage:          boundedFloat(annotations[capacityUtilizationKey], defaultCapacityUsage, 0.05, 1.0),
+		timeoutMultiplier:      positiveFloat(annotations[timeoutMultiplierKey], defaultTimeoutMultiple),
+		overflowBudget:         boundedFloat(annotations[overflowBudgetKey], defaultOverflowBudget, 0.0, 0.20),
+		overflowWindow:         positiveFloat(annotations[overflowWindowKey], defaultOverflowWindow),
+		minOverflowSamples:     max(1, parseInt(annotations[minOverflowSamplesKey], defaultMinOverflowSamples)),
+		drainBoostMax:          boundedFloat(annotations[drainBoostMaxKey], defaultDrainBoostMax, 1.0, 10.0),
 	}
 }
 
@@ -616,7 +781,32 @@ func e2bDemandFromSandbox(sandbox *unstructured.Unstructured) (demandEvent, bool
 	if err != nil {
 		return demandEvent{}, false
 	}
-	return demandEvent{at: claimedAt, replicas: 1}, true
+	return demandEvent{at: claimedAt, replicas: 1, uid: string(sandbox.GetUID())}, true
+}
+
+// overflowObservationFromSandbox classifies a claimed sandbox as cold-started
+// or warm-claimed using the upstream priority marker written exclusively by
+// the sandbox-manager cold-create path.
+func overflowObservationFromSandbox(sandbox *unstructured.Unstructured) (overflowObservation, bool) {
+	labels := sandbox.GetLabels()
+	if labels[sandboxClaimedLabel] != "true" {
+		return overflowObservation{}, false
+	}
+	return overflowObservation{
+		uid:  string(sandbox.GetUID()),
+		at:   sandboxClaimedAt(sandbox),
+		cold: sandbox.GetAnnotations()[sandboxPriorityKey] == coldPriorityValue,
+	}, true
+}
+
+func sandboxClaimedAt(sandbox *unstructured.Unstructured) time.Time {
+	rawTime := strings.TrimSpace(sandbox.GetAnnotations()[sandboxClaimTimeKey])
+	if rawTime != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, rawTime); err == nil {
+			return parsed
+		}
+	}
+	return sandbox.GetCreationTimestamp().Time
 }
 
 func persistentPoolID(set *unstructured.Unstructured) string {
@@ -673,6 +863,31 @@ func sandboxSetMaxUnavailable(set *unstructured.Unstructured, maxReplicas int) i
 	}
 }
 
+func applyGradualScaleDown(current, intent, stabilized, pending int, fraction float64) int {
+	if intent >= current {
+		return intent
+	}
+	if pending > 0 || stabilized >= current {
+		return current
+	}
+	if fraction <= 0 {
+		fraction = defaultScaleDownFraction
+	}
+	reduction := max(1, int(math.Ceil(float64(current)*fraction)))
+	return max(intent, current-reduction)
+}
+
+// effectiveDrainFraction accelerates post-burst drain when recent demand was
+// served entirely from the warm pool with zero cold overflow: inventory built
+// for an already-digested peak is idle cost, and the hourly traffic floor
+// still protects recurring tidal baselines.
+func effectiveDrainFraction(base, boostMax float64, active bool) float64 {
+	if !active || boostMax <= 1.0 {
+		return base
+	}
+	return min(drainFractionCap, base*boostMax)
+}
+
 func applySupplyGate(
 	intent int,
 	current int,
@@ -680,6 +895,7 @@ func applySupplyGate(
 	creating int,
 	maxUnavailable int,
 	capacityUsage float64,
+	maxScaleUpStep int,
 	supplyTimedOut bool,
 ) int {
 	if intent <= current {
@@ -688,19 +904,41 @@ func applySupplyGate(
 	if supplyTimedOut {
 		return current
 	}
+	stepLimitedIntent := intent
+	if maxScaleUpStep > 0 {
+		stepLimitedIntent = min(intent, current+maxScaleUpStep)
+	}
 	if maxUnavailable <= 0 {
-		return intent
+		return stepLimitedIntent
 	}
 	creationBudget := max(1, int(math.Floor(float64(maxUnavailable)*capacityUsage)))
 	creationSlots := max(0, creationBudget-creating)
-	return min(intent, max(current, actual+creationSlots))
+	return min(stepLimitedIntent, max(current, actual+creationSlots))
+}
+
+func calculateTrafficFloor(rate, leadSeconds float64, minReplicas int) int {
+	raw := int(math.Round(rate * max(1.0, leadSeconds)))
+	if raw < 0 {
+		raw = 0
+	}
+	return max(minReplicas, raw)
+}
+
+func calculateQueueBoost(pending int, factor float64, maximum int) int {
+	pending = max(0, pending)
+	factor = min(max(factor, 0.0), 1.0)
+	boost := int(math.Ceil(float64(pending) * factor))
+	if maximum > 0 {
+		boost = min(boost, maximum)
+	}
+	return boost
 }
 
 func calculateTarget(
 	rate float64,
 	refillSeconds float64,
 	slaSeconds float64,
-	serviceQuantile float64,
+	zScore float64,
 	safetyGuard int,
 ) int {
 	rate = max(0, rate)
@@ -708,9 +946,16 @@ func calculateTarget(
 	slaSeconds = max(0, slaSeconds)
 	horizon := max(0, refillSeconds-slaSeconds)
 	baseInventory := rate * horizon
-	zScore := math.Sqrt2 * math.Erfcinv(2*(1-serviceQuantile))
+	zScore = min(max(zScore, 0.0), 5.0)
 	safetyStock := zScore * math.Sqrt(max(0, rate*refillSeconds))
 	return int(math.Ceil(baseInventory+safetyStock)) + max(0, safetyGuard)
+}
+
+// quantileZ maps a coverage quantile (or a cold-overflow budget) to the
+// standard-normal z score used by the safety-stock term.
+func quantileZ(quantile float64) float64 {
+	quantile = min(max(quantile, 0.5000001), 0.9999999)
+	return math.Sqrt2 * math.Erfcinv(2*(1-quantile))
 }
 
 func clamp(value, minimum, maximum int) int {

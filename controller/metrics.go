@@ -30,6 +30,10 @@ type poolMetrics struct {
 	applied            int
 	available          int
 	creating           int
+	overflowRatio      float64
+	coldServed         int
+	zEffective         float64
+	drainBoost         bool
 }
 
 type metricsRegistry struct {
@@ -118,6 +122,10 @@ func (m *metricsRegistry) ServeHTTP(writer http.ResponseWriter, _ *http.Request)
 		{"sandbox_pool_target_applied", "Inventory target applied to SandboxSet.spec.replicas."},
 		{"sandbox_pool_available", "Currently available unclaimed sandboxes."},
 		{"sandbox_pool_creating", "Currently non-ready sandboxes in the pool."},
+		{"sandbox_pool_overflow_ratio", "Cold-start share of recently served demand in the overflow window."},
+		{"sandbox_pool_cold_served", "Cold-started replicas served inside the current overflow window."},
+		{"sandbox_pool_z_effective", "Effective safety-stock z score after overflow-budget calibration."},
+		{"sandbox_pool_drain_boost", "Whether accelerated post-burst drain is currently active."},
 	}
 	for _, description := range descriptions {
 		writeMetricHelp(writer, description.name, description.description, "gauge")
@@ -175,6 +183,14 @@ func metricValue(name string, pool poolMetrics) string {
 		return strconv.Itoa(pool.available)
 	case "sandbox_pool_creating":
 		return strconv.Itoa(pool.creating)
+	case "sandbox_pool_overflow_ratio":
+		return formatFloat(pool.overflowRatio)
+	case "sandbox_pool_cold_served":
+		return strconv.Itoa(pool.coldServed)
+	case "sandbox_pool_z_effective":
+		return formatFloat(pool.zEffective)
+	case "sandbox_pool_drain_boost":
+		return strconv.Itoa(boolInt(pool.drainBoost))
 	default:
 		return "0"
 	}
